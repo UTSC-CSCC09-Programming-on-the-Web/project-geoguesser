@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GeoGuesser</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="css/style.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script defer src="js/script.js"></script>
+  </head>
+
+  <body>
+    <main class="game-container">
+      <!-- Game View -->
+      <section class="street-view">
+        <!-- head's up display -->
+        <div class="hud">
+          <div class="hud-item">
+            <span class="label">Round</span>
+            <span class="value">1 / 5</span>
+          </div>
+
+          <div class="hud-item">
+            <span class="label">Score</span>
+            <span class="value">0</span>
+          </div>
+
+          <div class="hud-item">
+            <span class="label">Time</span>
+            <span class="value">02:00</span>
+          </div>
+        </div>
+
+        <!-- Placeholder for Street View -->
+        <div class="location-image">
+          <h1>Street View Here</h1>
+          <p>
+            Replace this with Google Street View, Mapillary, or another imagery
+            API.
+          </p>
+        </div>
+
+        <!-- Guess Controls -->
+        <div class="guess-panel">
+          <button class="hint-button">Hint</button>
+
+          <button class="guess-button">Make Guess</button>
+        </div>
+      </section>
+
+      <!-- Guess Map -->
+      <aside class="guess-map">
+        <div class="map-placeholder">
+          <h2>World Map</h2>
+          <p>Interactive map goes here</p>
+        </div>
+      </aside>
+      <!-- <div id="guess-map"></div> -->
+    </main>
+  </body>
+</html>
