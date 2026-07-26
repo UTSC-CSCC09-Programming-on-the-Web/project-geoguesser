@@ -4,59 +4,192 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GeoGuesser</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <!-- CSS for Leaflet (guess map) -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <!-- CSS for Mapillary (streetviews) -->
+    <link
+      href="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.css"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="css/style.css" />
-    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-    <script defer src="js/script.js"></script>
   </head>
-
   <body>
-    <main class="game-container">
-      <!-- Game View -->
-      <section class="street-view">
-        <!-- head's up display -->
-        <div class="hud">
-          <div class="hud-item">
-            <span class="label">Round</span>
-            <span class="value">1 / 5</span>
-          </div>
-
-          <div class="hud-item">
-            <span class="label">Score</span>
-            <span class="value">0</span>
-          </div>
-
-          <div class="hud-item">
-            <span class="label">Time</span>
-            <span class="value">02:00</span>
+    <div class="container">
+      <!-- Header -->
+      <header class="header">
+        <div class="header-content">
+          <h1 class="logo">🌍 GeoGuesser</h1>
+          <div class="header-stats">
+            <div class="stat">
+              <span class="stat-label">Round</span>
+              <span class="stat-value" id="round">1/5</span>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Score</span>
+              <span class="stat-value" id="score">0</span>
+            </div>
           </div>
         </div>
+      </header>
 
-        <!-- Placeholder for Street View -->
-        <div class="location-image">
-          <h1>Street View Here</h1>
-          <p>
-            Replace this with Google Street View, Mapillary, or another imagery
-            API.
-          </p>
+      <!-- Main Game Area -->
+      <main class="game-container">
+        <div class="game-layout">
+          <!-- Map Section -->
+          <section class="map-section">
+            <div class="map-header">
+              <h2>Street View</h2>
+              <div class="map-controls">
+                <button
+                  class="control-btn"
+                  id="rotateLeftBtn"
+                  title="Rotate Left"
+                >
+                  ⬅️
+                </button>
+                <button
+                  class="control-btn"
+                  id="rotateRightBtn"
+                  title="Rotate Right"
+                >
+                  ➡️
+                </button>
+                <button class="control-btn" id="zoomInBtn" title="Zoom In">
+                  🔍+
+                </button>
+                <button class="control-btn" id="zoomOutBtn" title="Zoom Out">
+                  🔍-
+                </button>
+              </div>
+            </div>
+            <div class="map-container" id="mapContainer">
+              <!-- <img
+                id="streetViewImage"
+                src=""
+                alt="Street View"
+                class="street-view-image"
+              />
+              <div class="map-placeholder">
+                <p>Loading street view...</p>
+              </div> -->
+              <div id="streetview-container"></div>
+            </div>
+          </section>
+
+          <!-- Guess Section -->
+          <section class="guess-section">
+            <div class="guess-header">
+              <h2>Make Your Guess</h2>
+            </div>
+
+            <!-- Guess Map -->
+            <div class="guess-map-container">
+              <div id="guessMap" class="guess-map"></div>
+              <p class="map-hint">Click on the map to place your guess</p>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="button-group">
+              <button class="btn btn-primary" id="submitGuessButton">
+                Submit Guess
+              </button>
+              <button class="btn btn-secondary" id="aiReviewButton">
+                AI Review
+              </button>
+              <button class="btn btn-secondary" id="skipButton">
+                Skip Round
+              </button>
+            </div>
+          </section>
         </div>
 
-        <!-- Guess Controls -->
-        <div class="guess-panel">
-          <button class="hint-button">Hint</button>
+        <!-- Results Section (Hidden by default) -->
+        <section class="results-section hidden" id="resultsSection">
+          <div class="results-content">
+            <div class="result-header">
+              <h2 id="resultTitle">Round Complete!</h2>
+            </div>
 
-          <button class="guess-button">Make Guess</button>
-        </div>
-      </section>
+            <div class="results-grid">
+              <div class="result-item">
+                <span class="result-label">Distance</span>
+                <span class="result-value" id="distanceResult">-- km</span>
+              </div>
+              <div class="result-item">
+                <span class="result-label">Points</span>
+                <span class="result-value" id="pointsResult">0</span>
+              </div>
+              <div class="result-item">
+                <span class="result-label">Accuracy</span>
+                <span class="result-value" id="accuracyResult">0%</span>
+              </div>
+            </div>
 
-      <!-- Guess Map -->
-      <aside class="guess-map">
-        <div class="map-placeholder">
-          <h2>World Map</h2>
-          <p>Interactive map goes here</p>
-        </div>
-      </aside>
-      <!-- <div id="guess-map"></div> -->
-    </main>
+            <!-- Result Map -->
+            <div class="result-map-container">
+              <div id="resultMap" class="result-map"></div>
+              <p class="map-hint">Your guess vs actual location</p>
+            </div>
+
+            <!-- Result Details -->
+            <div class="result-details">
+              <div class="detail-row">
+                <span class="detail-label">Your Guess:</span>
+                <span class="detail-value" id="yourGuess">--</span>
+              </div>
+              <div class="detail-row">
+                <span class="detail-label">Actual Location:</span>
+                <span class="detail-value" id="actualLocation">--</span>
+              </div>
+            </div>
+
+            <!-- Next Round Button -->
+            <div class="button-group">
+              <button class="btn btn-primary" id="nextRoundBtn">
+                Next Round
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Game Over Section (Hidden by default) -->
+        <section class="game-over-section hidden" id="gameOverSection">
+          <div class="game-over-content">
+            <h2>Game Over!</h2>
+            <div class="final-score">
+              <p class="final-score-label">Final Score</p>
+              <p class="final-score-value" id="finalScore">0</p>
+            </div>
+
+            <div class="score-breakdown" id="scoreBreakdown">
+              <!-- Round scores will be displayed here -->
+            </div>
+
+            <div class="button-group">
+              <button class="btn btn-primary" id="playAgainBtn">
+                Play Again
+              </button>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <!-- Footer -->
+      <footer class="footer">
+        <p>&copy; 2026 GeoGuesser Replica. Made with ❤️</p>
+      </footer>
+    </div>
+
+    <!-- Scripts -->
+    <!-- JS for Leaflet (guess map) -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="js/guess_map.js"></script>
+    <!-- JS for Mapillary (streetview map) -->
+    <script src="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.js"></script>
+    <script src="js/streetview.js"></script>
+    <!-- <script src="js/extraneous_code.js"></script> -->
   </body>
 </html>
