@@ -1,6 +1,8 @@
 import { Games } from "./games.js";
 import { Locations } from "./locations.js";
 import { Rounds } from "./rounds.js";
+import { Users } from "./users.js";
+import { Subscriptions } from "./subscriptions.js";
 
 // foreign-key relationship between Games and Rounds
 Games.hasMany(Rounds, {
@@ -24,5 +26,15 @@ Rounds.belongsTo(Locations, {
   as: "location",
 });
 
+Users.hasOne(Subscriptions, {
+  foreignKey: "userId",
+  as: "subscription",
+});
+
+Subscriptions.belongsTo(Users, {
+  foreignKey: "userId",
+  as: "user",
+});
+
 // export models
-export { Rounds, Games, Locations };
+export { Rounds, Games, Locations, Users, Subscriptions };
