@@ -22,14 +22,28 @@
       <header class="header">
         <div class="header-content">
           <h1 class="logo">🌍 GeoGuesser</h1>
-          <div class="header-stats">
-            <div class="stat">
-              <span class="stat-label">Round</span>
-              <span class="stat-value" id="round">1/5</span>
+          <div class="header-controls">
+            <div class="header-stats">
+              <div class="stat">
+                <span class="stat-label">Round</span>
+                <span class="stat-value" id="round">1/5</span>
+              </div>
+              <div class="stat">
+                <span class="stat-label">Score</span>
+                <span class="stat-value" id="score">0</span>
+              </div>
             </div>
-            <div class="stat">
-              <span class="stat-label">Score</span>
-              <span class="stat-value" id="score">0</span>
+            <div class="auth-controls">
+              <span class="auth-status" id="authStatus">Checking login...</span>
+              <button class="btn btn-secondary auth-btn" id="loginButton">
+                Login with Google
+              </button>
+              <button class="btn btn-secondary auth-btn hidden" id="subscribeButton">
+                Subscribe for AI
+              </button>
+              <button class="btn btn-secondary auth-btn hidden" id="logoutButton">
+                Logout
+              </button>
             </div>
           </div>
         </div>
@@ -37,6 +51,14 @@
 
       <!-- Main Game Area -->
       <main class="game-container">
+        <section class="access-gate hidden" id="accessGate">
+          <div class="access-gate-content">
+            <h2>Login + active subscription required</h2>
+            <p id="accessGateMessage">
+              Sign in with Google, then complete checkout to unlock gameplay.
+            </p>
+          </div>
+        </section>
         <div class="game-layout">
           <!-- Map Section -->
           <section class="map-section">
@@ -184,6 +206,7 @@
     </div>
 
     <!-- Scripts -->
+    <script src="js/auth.js"></script>
     <!-- JS for Leaflet (guess map) -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="js/guess_map.js"></script>

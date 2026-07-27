@@ -1,37 +1,47 @@
 import express from "express";
+import cookieParser from "cookie-parser";
+import passport from "passport";
 import { sequelize } from "./database/datasource.js";
 import { streetviewRouter } from "./routers/streetviewRouter.js";
-import { Games, Locations, Rounds } from "./database/models/models.js";
+import {
+  Games,
+  Locations,
+  Rounds,
+  Users,
+  Subscriptions,
+} from "./database/models/models.js";
+import {
+  authBillingRouter,
+  authenticateToken,
+  requireActiveSubscription,
+} from "./routers/authBillingRouter.js";
 
-const PORT = 3000;
+const port = Number(process.env.PORT ?? 3000);
+if (!Number.isInteger(port)) {
+  throw new Error("Invalid PORT environment variable");
+}
+
 const app = express();
 
-// serve files in "static" directory automatically
 app.use(express.static("static"));
+app.use(cookieParser());
+app.use(passport.initialize());
 
-// parse requests so that req.body is a Javascript object
+app.use("/api/webhook", express.raw({ type: "application/json" }));
+app.use(authBillingRouter);
+
 app.use(express.json());
+app.use("/streetview", authenticateToken, requireActiveSubscription, streetviewRouter);
 
-// attach router to handle requests with a specific URL
-app.use("/streetview", streetviewRouter);
-
-// attempt connection with database
 try {
-  // checks connection with database
   await sequelize.authenticate();
-
-  // syncs table definitions defined in models to database
-  // TODO: remove { alter: true } after working product exists
   await sequelize.sync({ alter: true });
 
-  console.log("Database connected and synchronized");
-
-  // server now listening on PORT
-  app.listen(PORT, (err) => {
-    if (err) {
-      console.log(err);
+  app.listen(port, (error) => {
+    if (error) {
+      console.log(error);
     } else {
-      console.log(`Server started on port ${PORT}`);
+      console.log(`Server started on port ${port}`);
     }
   });
 } catch (error) {
