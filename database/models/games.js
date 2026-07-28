@@ -31,5 +31,18 @@ export const Games = sequelize.define(
       },
     },
   },
-  { tableName: "Games", timestamps: false },
+  {
+    tableName: "Games",
+    timestamps: false,
+    indexes: [
+      {
+        name: "one_in_progress_game_per_user",
+        unique: true,
+        fields: ["user_id"],
+        where: {
+          status: "in_progress",
+        },
+      },
+    ],
+  },
 );

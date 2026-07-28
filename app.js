@@ -3,6 +3,7 @@ import cookieParser from "cookie-parser";
 import passport from "passport";
 import { sequelize } from "./database/datasource.js";
 import { streetviewRouter } from "./routers/streetviewRouter.js";
+import { gameRouter } from "./routers/gameRouter.js";
 import {
   Games,
   Locations,
@@ -16,8 +17,8 @@ import {
   requireActiveSubscription,
 } from "./routers/authBillingRouter.js";
 
-const port = Number(process.env.PORT ?? 3000);
-if (!Number.isInteger(port)) {
+const PORT = Number(process.env.PORT ?? 3000);
+if (!Number.isInteger(PORT)) {
   throw new Error("Invalid PORT environment variable");
 }
 
@@ -42,11 +43,13 @@ try {
   await sequelize.authenticate();
   await sequelize.sync({ alter: true });
 
-  app.listen(port, (error) => {
+  console.log("Database connected and synchronized");
+
+  app.listen(PORT, (error) => {
     if (error) {
       console.log(error);
     } else {
-      console.log(`Server started on port ${port}`);
+      console.log(`Server started on PORT ${PORT}`);
     }
   });
 } catch (error) {

@@ -33,6 +33,11 @@ CREATE TABLE IF NOT EXISTS "Games" (
         ON DELETE CASCADE
 );
 
+-- enforce unique game in progress for each user
+CREATE UNIQUE INDEX one_game_in_progress_per_user
+    on "Games" (user_id)
+    WHERE status = 'in_progress';
+
 -- Rounds table
 CREATE TABLE IF NOT EXISTS "Rounds" (
     round_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
