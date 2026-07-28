@@ -4,6 +4,11 @@ let guessMap;
 let currentGuess = null;
 // marker for guess on map
 let guessMarker;
+let gameplayEnabled = false;
+
+window.addEventListener("geoguesser-access-changed", (event) => {
+  gameplayEnabled = event.detail.canPlay;
+});
 
 // create guess-map object
 document.addEventListener("DOMContentLoaded", () => {
@@ -21,6 +26,10 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 function updateGuessClick(event) {
+  if (!gameplayEnabled) {
+    return;
+  }
+
   const lat = event.latlng.lat;
   const lng = event.latlng.lng;
 
@@ -40,6 +49,10 @@ function updateGuessClick(event) {
 // #region submit-guess event listener
 const submitGuessButton = document.querySelector("#submitGuessButton");
 submitGuessButton.addEventListener("click", (event) => {
+  if (!gameplayEnabled) {
+    throw new Error("Gameplay is locked until your subscription is active.");
+  }
+
   if (!currentGuess) {
     throw new Error("Please guess on the map before submitting");
   } else {
@@ -54,6 +67,11 @@ submitGuessButton.addEventListener("click", (event) => {
       }),
     })
       .then((res) => {
+        if (!res.ok) {
+          return res.json().then((payload) => {
+            throw new Error(payload.message || payload.error || "Unable to calculate distance.");
+          });
+        }
         return res.json();
       })
       .then((distance) => {
@@ -68,18 +86,28 @@ submitGuessButton.addEventListener("click", (event) => {
 // TODO: need to implement reading the response from /streetview/ai-review
 const aiReviewButton = document.querySelector("#aiReviewButton");
 aiReviewButton.addEventListener("click", async () => {
-  // TODO: currently, imageId is hard-coded, but will need to get the actual imageId displayed later
+  if (!gameplayEnabled) {
+    throw new Error("Gameplay is locked until your subscription is active.");
+  }
+
+  const imageId = window.currentStreetviewImageId;
+  if (!imageId) {
+    throw new Error("No streetview image loaded yet.");
+  }
+
   const response = await fetch("/streetview/ai-review", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     // sending imageId as string to ensure ID is preserved (int might overflow)
-    body: JSON.stringify({ imageId: String(3812153535576812) }),
+    body: JSON.stringify({ imageId: imageId }),
   });
 
   const aiReview = await response.json();
 
   if (!response.ok) {
-    throw new Error(`Request to /streetview/ai-review failed.`, aiReview.error);
+    throw new Error(
+      aiReview.message || aiReview.error || "Request to /streetview/ai-review failed.",
+    );
   } else {
     console.log(aiReview.review);
   }
