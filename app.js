@@ -31,7 +31,12 @@ app.use("/api/webhook", express.raw({ type: "application/json" }));
 app.use(authBillingRouter);
 
 app.use(express.json());
-app.use("/streetview", authenticateToken, requireActiveSubscription, streetviewRouter);
+app.use(
+  "/streetview",
+  authenticateToken,
+  requireActiveSubscription,
+  streetviewRouter,
+);
 
 try {
   await sequelize.authenticate();

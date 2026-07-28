@@ -2,7 +2,8 @@
   "type": "module",
   "scripts": {
     "start": "node app.js",
-    "dev": "node --watch app.js"
+    "dev": "node --watch app.js",
+    "seed_locations": "node database/seedLocations.js"
   },
   "dependencies": {
     "cookie-parser": "^1.4.7",

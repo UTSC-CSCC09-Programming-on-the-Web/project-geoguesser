@@ -5,7 +5,7 @@ export const Locations = sequelize.define(
   "Locations",
   {
     imageId: {
-      type: DataTypes.BIGINT,
+      type: DataTypes.STRING(50),
       primaryKey: true,
       allowNull: false,
       field: "image_id",

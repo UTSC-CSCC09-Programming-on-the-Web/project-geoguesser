@@ -58,10 +58,12 @@ submitGuessButton.addEventListener("click", (event) => {
   } else {
     console.log("Guess submitted: ", currentGuess);
 
+    // calculate distance between guess and actual location
     fetch("/streetview/calculate-distance", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        imageId: window.currentImageId,
         guessLat: currentGuess.lat,
         guessLng: currentGuess.lng,
       }),
@@ -69,7 +71,11 @@ submitGuessButton.addEventListener("click", (event) => {
       .then((res) => {
         if (!res.ok) {
           return res.json().then((payload) => {
-            throw new Error(payload.message || payload.error || "Unable to calculate distance.");
+            throw new Error(
+              payload.message ||
+                payload.error ||
+                "Unable to calculate distance.",
+            );
           });
         }
         return res.json();
@@ -83,15 +89,13 @@ submitGuessButton.addEventListener("click", (event) => {
 });
 // #endregion
 
-// TODO: need to implement reading the response from /streetview/ai-review
 const aiReviewButton = document.querySelector("#aiReviewButton");
 aiReviewButton.addEventListener("click", async () => {
   if (!gameplayEnabled) {
     throw new Error("Gameplay is locked until your subscription is active.");
   }
 
-  const imageId = window.currentStreetviewImageId;
-  if (!imageId) {
+  if (!window.imageId) {
     throw new Error("No streetview image loaded yet.");
   }
 
@@ -99,14 +103,16 @@ aiReviewButton.addEventListener("click", async () => {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     // sending imageId as string to ensure ID is preserved (int might overflow)
-    body: JSON.stringify({ imageId: imageId }),
+    body: JSON.stringify({ imageId: String(3812153535576812) }),
   });
 
   const aiReview = await response.json();
 
   if (!response.ok) {
     throw new Error(
-      aiReview.message || aiReview.error || "Request to /streetview/ai-review failed.",
+      aiReview.message ||
+        aiReview.error ||
+        "Request to /streetview/ai-review failed.",
     );
   } else {
     console.log(aiReview.review);

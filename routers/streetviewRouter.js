@@ -1,6 +1,8 @@
 import dotenv from "dotenv";
-import { Router } from "express";
 import { calculateDistance } from "../utility/distance.js";
+import { Locations } from "../database/models/locations.js";
+import { Router } from "express";
+import { sequelize } from "../database/datasource.js";
 
 export const streetviewRouter = Router();
 
@@ -10,50 +12,21 @@ dotenv.config();
 const { MAPILLARY_ACCESS_TOKEN, GEMINI_MODEL, GEMINI_API_KEY } = process.env;
 // #endregion
 
-// selected locations to be displayed
-const locations = [];
-
-// actual location coordinates
-let lat, lng;
-
-// #region initializing locations
-// Toronto, Canada
-locations.push({
-  imageId: 339131707727137,
-  lat: 43.745436415377014,
-  lng: -79.32577136585002,
-});
-
-// Tokyo, Japan
-locations.push({
-  imageId: 3812153535576812,
-  lat: 35.690605863076,
-  lng: 139.70296007154002,
-});
-
-// older Tokyo, Japan data but was causing bugs
-// {imageId: 340172134116218,
-// lat: 35.689087384434,
-// lng: 139.70067104221994,}
-
-// Bangkok, Thailand
-locations.push({
-  imageId: 1395118605995100,
-  lat: 13.736635360000008,
-  lng: 100.56136070000002,
-});
-// #endregion
-
 // generate and return valid image id of random location on Mapillary
 streetviewRouter.get("/random-location", async (req, res) => {
-  const randomIndex = Math.floor(Math.random() * locations.length);
+  try {
+    // get random location
+    const location = await Locations.findOne({
+      order: sequelize.literal("RANDOM()"),
+    });
 
-  // actual location coordinates
-  lat = locations[randomIndex].lat;
-  lng = locations[randomIndex].lng;
-
-  // send imageId
-  return res.json(locations[randomIndex].imageId);
+    return res.json(location.imageId);
+  } catch (error) {
+    console.log(error);
+    return res
+      .status(500)
+      .json({ error: `Unable to select Location. ${error}` });
+  }
 });
 
 streetviewRouter.get("/access-token", async (req, res) => {
@@ -180,10 +153,13 @@ streetviewRouter.post("/ai-review", async (req, res) => {
   }
 });
 
-streetviewRouter.post("/calculate-distance", (req, res) => {
+streetviewRouter.post("/calculate-distance", async (req, res) => {
+  // imageId is a string
+  const imageId = req.body.imageId;
   const guessLat = Number(req.body.guessLat);
   const guessLng = Number(req.body.guessLng);
 
+  // #region check if guess is valid
   const validGuess =
     Number.isFinite(guessLat) &&
     Number.isFinite(guessLng) &&
@@ -195,9 +171,35 @@ streetviewRouter.post("/calculate-distance", (req, res) => {
   if (!validGuess) {
     return res.status(400).json({ error: "Guess lat / lng not valid" });
   }
+  // #endregion
+
+  // #region check if imageId is valid
+  const validImageId = typeof imageId === "string" && /^\d+$/.test(imageId);
+
+  if (!validImageId) {
+    return res
+      .status(400)
+      .json({ error: "Invalid imageId. Should be a string of digits only." });
+  }
+  // #endregion
+
+  // #region get coordinates of location
+  const location = await Locations.findByPk(imageId, {
+    attributes: ["lat", "lng"],
+  });
+
+  if (!location) {
+    return res.status(404).json({ error: "Location not found." });
+  }
+  // #endregion
 
   // calculate distance between guess and actual coordinates.
-  const distance = calculateDistance(lat, lng, guessLat, guessLng);
+  const distance = calculateDistance(
+    location.lat,
+    location.lng,
+    guessLat,
+    guessLng,
+  );
 
   return res.json(distance);
 });

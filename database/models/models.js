@@ -26,6 +26,26 @@ Rounds.belongsTo(Locations, {
   as: "location",
 });
 
+// foreign-key relationship between Games and Users
+Users.hasMany(Games, {
+  foreignKey: {
+    name: "userId",
+    field: "user_id",
+  },
+  sourceKey: "userId",
+  as: "games",
+});
+
+Games.belongsTo(Users, {
+  foreignKey: {
+    name: "userId",
+    field: "user_id",
+  },
+  targetKey: "userId",
+  as: "user",
+});
+
+// foreign-key relationship between Users and Subscriptions
 Users.hasOne(Subscriptions, {
   foreignKey: "userId",
   as: "subscription",

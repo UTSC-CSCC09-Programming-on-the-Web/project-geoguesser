@@ -32,7 +32,7 @@ export const Rounds = sequelize.define(
       onDelete: "CASCADE",
     },
     imageId: {
-      type: DataTypes.INTEGER,
+      type: DataTypes.STRING(50),
       allowNull: false,
       field: "image_id",
       references: {

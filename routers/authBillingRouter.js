@@ -71,7 +71,7 @@ export const requireActiveSubscription = async (req, res, next) => {
 const findOrCreateUser = async (profile) => {
   const providerUserId = profile.id;
   const email = profile.emails?.[0]?.value;
-  const displayName = profile.displayName || "GeoGuesser Player";
+  const username = profile.username || "GeoGuesser Player";
 
   if (!email) {
     throw new Error("Google profile did not include an email address");
@@ -92,7 +92,7 @@ const findOrCreateUser = async (profile) => {
     return {
       id: existingUser.userId,
       email: existingUser.email,
-      name: existingUser.displayName,
+      name: existingUser.username,
       status: existingSubscription?.status || "pending_payment",
     };
   }
@@ -101,7 +101,7 @@ const findOrCreateUser = async (profile) => {
     const user = await Users.create(
       {
         email: email,
-        displayName: displayName,
+        username: username,
         authProvider: "google",
         providerUserId: providerUserId,
       },
@@ -122,7 +122,7 @@ const findOrCreateUser = async (profile) => {
   return {
     id: createdUser.userId,
     email: createdUser.email,
-    name: createdUser.displayName,
+    name: createdUser.username,
     status: "pending_payment",
   };
 };
@@ -171,7 +171,8 @@ router.post("/api/webhook", async (req, res) => {
     if (event.type === "checkout.session.completed") {
       const checkoutSession = event.data.object;
       const userId = Number(
-        checkoutSession.client_reference_id || checkoutSession.metadata?.user_id,
+        checkoutSession.client_reference_id ||
+          checkoutSession.metadata?.user_id,
       );
 
       if (!Number.isInteger(userId)) {
@@ -207,7 +208,8 @@ router.post("/api/webhook", async (req, res) => {
 router.get("/auth/google", (req, res, next) => {
   if (!oauthEnabled) {
     return res.status(503).json({
-      message: "Google OAuth is not configured. Set GOOGLE_* environment variables.",
+      message:
+        "Google OAuth is not configured. Set GOOGLE_* environment variables.",
     });
   }
 
@@ -288,32 +290,37 @@ router.get("/api/me", authenticateToken, async (req, res) => {
   }
 });
 
-router.post("/api/create-checkout-session", authenticateToken, async (req, res) => {
-  if (!stripeEnabled || !stripe) {
-    return res.status(503).json({
-      message: "Stripe is not configured. Set STRIPE_* environment variables.",
-    });
-  }
+router.post(
+  "/api/create-checkout-session",
+  authenticateToken,
+  async (req, res) => {
+    if (!stripeEnabled || !stripe) {
+      return res.status(503).json({
+        message:
+          "Stripe is not configured. Set STRIPE_* environment variables.",
+      });
+    }
 
-  try {
-    const checkoutSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      mode: "subscription",
-      line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
-      client_reference_id: String(req.user.id),
-      customer_email: req.user.email,
-      metadata: {
-        user_id: String(req.user.id),
-      },
-      success_url: `${frontendUrl}/?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${frontendUrl}/?checkout=canceled`,
-    });
+    try {
+      const checkoutSession = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        mode: "subscription",
+        line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
+        client_reference_id: String(req.user.id),
+        customer_email: req.user.email,
+        metadata: {
+          user_id: String(req.user.id),
+        },
+        success_url: `${frontendUrl}/?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${frontendUrl}/?checkout=canceled`,
+      });
 
-    return res.json({ url: checkoutSession.url });
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
+      return res.json({ url: checkoutSession.url });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  },
+);
 
 router.get("/api/checkout/confirm", authenticateToken, async (req, res) => {
   if (!stripeEnabled || !stripe) {
@@ -324,7 +331,9 @@ router.get("/api/checkout/confirm", authenticateToken, async (req, res) => {
 
   const sessionId = String(req.query.session_id || "").trim();
   if (!sessionId) {
-    return res.status(400).json({ message: "Missing session_id query parameter." });
+    return res
+      .status(400)
+      .json({ message: "Missing session_id query parameter." });
   }
 
   try {
@@ -360,7 +369,9 @@ router.get("/api/checkout/confirm", authenticateToken, async (req, res) => {
 
     return res.json({ status: "active" });
   } catch (error) {
-    return res.status(500).json({ message: "Unable to confirm checkout session." });
+    return res
+      .status(500)
+      .json({ message: "Unable to confirm checkout session." });
   }
 });
 

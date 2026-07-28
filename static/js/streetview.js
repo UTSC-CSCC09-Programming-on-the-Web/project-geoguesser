@@ -13,7 +13,9 @@ const fetchJsonOrThrow = async (url, options) => {
 
   if (!response.ok) {
     const message =
-      payload?.message || payload?.error || `Request failed with status ${response.status}`;
+      payload?.message ||
+      payload?.error ||
+      `Request failed with status ${response.status}`;
     throw new Error(message);
   }
 
@@ -40,7 +42,9 @@ const initializeStreetview = async () => {
       container: streetviewContainer,
     });
 
-    const randomLocationImageId = await fetchJsonOrThrow("/streetview/random-location");
+    const randomLocationImageId = await fetchJsonOrThrow(
+      "/streetview/random-location",
+    );
     window.currentStreetviewImageId = String(randomLocationImageId);
 
     await viewer.moveTo(randomLocationImageId);

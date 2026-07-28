@@ -19,10 +19,13 @@ export const Users = sequelize.define(
         isEmail: true,
       },
     },
-    displayName: {
+    username: {
       type: DataTypes.STRING,
       allowNull: false,
-      field: "display_name",
+      unique: true,
+      validate: {
+        notEmpty: true,
+      },
     },
     authProvider: {
       type: DataTypes.STRING,
