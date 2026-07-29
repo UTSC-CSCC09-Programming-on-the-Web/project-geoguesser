@@ -1,12 +1,14 @@
 import { Router } from "express";
 import { sequelize } from "../database/datasource.js";
+import { Locations } from "../database/models/locations.js";
 import { Games } from "../database/models/games.js";
 import { Rounds } from "../database/models/rounds.js";
+import { calculateDistance } from "../utility/distance.js";
 
 export const gameRouter = Router();
 
-// Finds game and round in progress for current user. If current round is non-existent, creates new game and round.
-// Returns {roundNumber, imageId}
+// Finds, and returns, game and round in progress for current user. If current round is non-existent, creates new game and round, and returns that.
+// Returns {gameId, imageId, roundId, roundNumber}
 gameRouter.post("/start", async (req, res) => {
   const userId = req.user.userId;
 
@@ -33,34 +35,47 @@ gameRouter.post("/start", async (req, res) => {
           transaction: transaction,
         });
 
+        // no round exists for game in-progress
         if (!currentRound) {
           throw new Error("In-progress game has no rounds");
         }
 
+        // current round already has a guess
+        if (
+          currentRound.guessLat !== null ||
+          currentRound.guessLng !== null ||
+          currentRound.distance !== null
+        ) {
+          throw new Error(
+            "Round fetched in start-game sequence has already been guessed",
+          );
+        }
+
         return {
-          roundNumber: currentRound.roundNumber,
+          gameId: existingGame.gameId,
           imageId: currentRound.imageId,
+          roundId: currentRound.roundId,
+          roundNumber: currentRound.roundNumber,
         };
       }
       // user does not have a game in progress
       else {
-        // get random location
-        const location = await Locations.findOne({
-          order: sequelize.literal("RANDOM()"),
-          transaction: transaction,
-        });
+        // #region get random location
+        const location = await randomLocation(transaction);
 
         if (!location) {
           throw new Error("Unable to generate randomized location");
         }
+        // #endregion
 
-        // create new game
+        // #region create new game
         const newGame = await Games.create(
           { userId: userId, status: "in_progress" },
           { transaction: transaction },
         );
+        // #endregion
 
-        // create first round for game
+        // #region create first round for game
         const firstRound = await Rounds.create(
           {
             roundNumber: 1,
@@ -69,10 +84,13 @@ gameRouter.post("/start", async (req, res) => {
           },
           { transaction: transaction },
         );
+        // #endregion
 
         return {
-          roundNumber: firstRound.roundNumber,
+          gameId: newGame.gameId,
           imageId: firstRound.imageId,
+          roundId: firstRound.roundId,
+          roundNumber: firstRound.roundNumber,
         };
       }
     });
@@ -84,3 +102,148 @@ gameRouter.post("/start", async (req, res) => {
     return res.status(500).json({ error: "Failed to get starting game info" });
   }
 });
+
+// Submits guess coordinates for a specified game and round. Then either marks game complete (if it was round three) or creates and returns new round info.
+// Returns {distance, newRoundData} where newRoundData is undefined if game got completed, or is newRoundData = {gameId, imageId, roundId, roundNumber}
+// distance corresponds to distance of guess from actual location
+gameRouter.post("/:gameId/rounds/:roundId/guess", async (req, res) => {
+  // #region read request variables
+  const gameId = Number(req.params.gameId);
+  const roundId = Number(req.params.roundId);
+  const user = req.user;
+  const { guessLat, guessLng } = req.body;
+
+  if (!Number.isInteger(gameId) || !Number.isInteger(roundId)) {
+    return res.status(400).json({
+      error: "gameId and roundId passed as path parameters are not valid",
+    });
+  }
+  // #endregion
+
+  try {
+    const result = await sequelize.transaction(async (transaction) => {
+      // #region check if round and game that's in_progress exists for user
+      const round = await Rounds.findOne({
+        where: {
+          gameId,
+        },
+        include: [
+          {
+            model: Games,
+            as: "game",
+            attributes: ["gameId", "status"],
+            where: { gameId, userId: user.userId, status: "in_progress" },
+          },
+          {
+            model: Locations,
+            as: "location",
+            attributes: ["lat", "lng"],
+            required: true,
+          },
+        ],
+        order: [["roundNumber", "DESC"]],
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+
+      if (!round || round.roundId !== roundId) {
+        throw new Error("In-progress game or round for user not found");
+      }
+
+      // check if round has empty guess coordinates and distance (prevents overwriting previous guesses)
+      if (
+        round.guessLat !== null ||
+        round.guessLng !== null ||
+        round.distance !== null
+      ) {
+        return res
+          .status(409)
+          .json({ error: "That round has already been guessed" });
+      }
+      // #endregion
+
+      // #region validate user guesses
+      const guessLatValid =
+        Number.isFinite(guessLat) && guessLat >= -90 && guessLat <= 90;
+      const guessLngValid =
+        Number.isFinite(guessLng) && guessLng >= -180 && guessLng <= 180;
+
+      if (!guessLatValid || !guessLngValid) {
+        throw new Error("Coordinates guessed are not valid");
+      }
+      // #endregion
+
+      // #region calculate distance between guess and actual location
+      const distance = calculateDistance(
+        guessLat,
+        guessLng,
+        round.location.lat,
+        round.location.lng,
+      );
+      // #endregion
+
+      // #region update row & [ create new round || mark game as completed]
+      // update round row
+      await round.update({ guessLat, guessLng, distance }, { transaction });
+
+      let newRoundData;
+
+      // if another round needs to be played, create new round
+      if (round.roundNumber < 3) {
+        // #region get random location
+        const location = await randomLocation(transaction);
+
+        if (!location) {
+          throw new Error("Unable to generate randomized location");
+        }
+        // #endregion
+
+        // #region create new round for game
+        const newRound = await Rounds.create(
+          {
+            roundNumber: round.roundNumber + 1,
+            gameId: round.gameId,
+            imageId: location.imageId,
+          },
+          { transaction },
+        );
+
+        newRoundData = {
+          gameId: newRound.gameId,
+          imageId: newRound.imageId,
+          roundId: newRound.roundId,
+          roundNumber: newRound.roundNumber,
+        };
+        // #endregion
+      } else if (round.roundNumber === 3) {
+        // # mark game asociated with round as completed
+        await round.game.update({ status: "completed" }, { transaction });
+
+        newRoundData = undefined;
+      }
+      // #endregion
+
+      return {
+        distance,
+        guessLocation: { lat: guessLat, lng: guessLng },
+        actualLocation: { lat: round.location.lat, lng: round.location.lng },
+        newRoundData,
+      };
+    });
+
+    // result is {distance, guessLocation, actualLocation, newRoundData}
+    return res.json(result);
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({ error: "Failed to log guess" });
+  }
+});
+
+// Returns random location. Returns a Promise, so use `await`
+async function randomLocation(transaction) {
+  // note: returns a Promise
+  return Locations.findOne({
+    order: sequelize.literal("RANDOM()"),
+    transaction: transaction,
+  });
+}

@@ -38,10 +38,16 @@
               <button class="btn btn-secondary auth-btn" id="loginButton">
                 Login with Google
               </button>
-              <button class="btn btn-secondary auth-btn hidden" id="subscribeButton">
+              <button
+                class="btn btn-secondary auth-btn hidden"
+                id="subscribeButton"
+              >
                 Subscribe for AI
               </button>
-              <button class="btn btn-secondary auth-btn hidden" id="logoutButton">
+              <button
+                class="btn btn-secondary auth-btn hidden"
+                id="logoutButton"
+              >
                 Logout
               </button>
             </div>
@@ -132,30 +138,24 @@
         <section class="results-section hidden" id="resultsSection">
           <div class="results-content">
             <div class="result-header">
-              <h2 id="resultTitle">Round Complete!</h2>
+              <h2>Round Complete!</h2>
             </div>
 
             <div class="results-grid">
               <div class="result-item">
-                <span class="result-label">Distance</span>
+                <span class="result-label">Distance from location</span>
                 <span class="result-value" id="distanceResult">-- km</span>
-              </div>
-              <div class="result-item">
-                <span class="result-label">Points</span>
-                <span class="result-value" id="pointsResult">0</span>
-              </div>
-              <div class="result-item">
-                <span class="result-label">Accuracy</span>
-                <span class="result-value" id="accuracyResult">0%</span>
               </div>
             </div>
 
+            <!-- remove -->
             <!-- Result Map -->
             <div class="result-map-container">
               <div id="resultMap" class="result-map"></div>
               <p class="map-hint">Your guess vs actual location</p>
             </div>
 
+            <!-- remove -->
             <!-- Result Details -->
             <div class="result-details">
               <div class="detail-row">
@@ -170,7 +170,7 @@
 
             <!-- Next Round Button -->
             <div class="button-group">
-              <button class="btn btn-primary" id="nextRoundBtn">
+              <button class="btn btn-primary" id="nextRoundButton">
                 Next Round
               </button>
             </div>
@@ -181,11 +181,14 @@
         <section class="game-over-section hidden" id="gameOverSection">
           <div class="game-over-content">
             <h2>Game Over!</h2>
+
+            <!-- remove -->
             <div class="final-score">
               <p class="final-score-label">Final Score</p>
               <p class="final-score-value" id="finalScore">0</p>
             </div>
 
+            <!-- remove -->
             <div class="score-breakdown" id="scoreBreakdown">
               <!-- Round scores will be displayed here -->
             </div>
@@ -212,7 +215,7 @@
     <script src="js/guess_map.js"></script>
     <!-- JS for Mapillary (streetview map) -->
     <script src="https://unpkg.com/mapillary-js@4.1.2/dist/mapillary.js"></script>
-    <script src="js/streetview.js"></script>
+    <!-- <script src="js/streetview.js"></script> -->
     <script src="js/main.js"></script>
     <!-- <script src="js/extraneous_code.js"></script> -->
   </body>
