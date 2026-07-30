@@ -34,97 +34,175 @@ const stripeEnabled =
 
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
-export const authenticateToken = (req, res, next) => {
+export const authenticateToken = async (req, res, next) => {
   const token = req.cookies.token;
+
   if (!token) {
-    return res.status(401).json({ message: "Unauthorized" });
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
-  jwt.verify(token, JWT_SECRET, (error, user) => {
-    if (error) {
-      return res.status(403).json({ message: "Forbidden" });
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+
+    // get user from database
+    const user = await Users.findByPk(payload.userId);
+
+    if (!user) {
+      return res.status(401).json({ error: "User no longer exists" });
     }
 
+    // attach user to request
     req.user = user;
+
     return next();
-  });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(403).json({ error: "Invalid or expired token" });
+  }
 };
 
 export const requireActiveSubscription = async (req, res, next) => {
   try {
     const subscription = await Subscriptions.findOne({
-      where: { userId: req.user.id },
+      where: { userId: req.user.userId },
     });
 
     if (subscription?.status !== "active") {
       return res
         .status(403)
-        .json({ message: "Subscription expired. Please renew." });
+        .json({ error: "Subscription expired. Please renew." });
     }
+
+    // attach subscription to request
+    req.subscription = subscription;
 
     return next();
   } catch (error) {
-    return res.status(500).json({ message: "Database error" });
+    return res.status(500).json({ error: "Database error" });
   }
 };
+
+function generateUniqueUsername(displayName, email, id) {
+  const baseUsername = displayName || email?.split("@")[0] || "player";
+
+  const username = `${baseUsername}_${id}`
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_")
+    .slice(0, 255);
+}
 
 const findOrCreateUser = async (profile) => {
   const providerUserId = profile.id;
   const email = profile.emails?.[0]?.value;
-  const username = profile.username || "GeoGuesser Player";
 
   if (!email) {
     throw new Error("Google profile did not include an email address");
   }
 
+  // try to find existing user
   const existingUser = await Users.findOne({
     where: {
       authProvider: "google",
-      providerUserId: providerUserId,
+      providerUserId,
     },
   });
 
   if (existingUser) {
-    const existingSubscription = await Subscriptions.findOne({
-      where: { userId: existingUser.userId },
-    });
-
-    return {
-      id: existingUser.userId,
-      email: existingUser.email,
-      name: existingUser.username,
-      status: existingSubscription?.status || "pending_payment",
-    };
+    return existingUser;
   }
 
-  const createdUser = await sequelize.transaction(async (transaction) => {
-    const user = await Users.create(
-      {
-        email: email,
-        username: username,
-        authProvider: "google",
-        providerUserId: providerUserId,
-      },
-      { transaction },
-    );
+  // create new user
+  else {
+    // create unique username
+    const username = `${profile.displayName || "player"}_${profile.id}`
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, "_")
+      .slice(0, 255);
 
-    await Subscriptions.create(
-      {
-        userId: user.userId,
-        status: "pending_payment",
-      },
-      { transaction },
-    );
+    const user = await sequelize.transaction(async (transaction) => {
+      // create new user in db
+      const newUser = await Users.create(
+        {
+          email,
+          username,
+          authProvider: "google",
+          providerUserId,
+        },
+        { transaction },
+      );
+
+      await Subscriptions.create(
+        {
+          userId: newUser.userId,
+          status: "pending_payment",
+        },
+        { transaction },
+      );
+
+      return newUser;
+    });
 
     return user;
-  });
+  }
 
-  return {
-    id: createdUser.userId,
-    email: createdUser.email,
-    name: createdUser.username,
-    status: "pending_payment",
-  };
+  // // REMOVE: old code
+  // const username =
+  //   profile.username ||
+  //   generateUniqueUsername(profile.displayName, email, profile.id);
+
+  // if (!email) {
+  //   throw new Error("Google profile did not include an email address");
+  // }
+
+  // const existingUser = await Users.findOne({
+  //   where: {
+  //     authProvider: "google",
+  //     providerUserId: providerUserId,
+  //   },
+  // });
+
+  // if (existingUser) {
+  //   const existingSubscription = await Subscriptions.findOne({
+  //     where: { userId: existingUser.userId },
+  //   });
+
+  //   return {
+  //     id: existingUser.userId,
+  //     email: existingUser.email,
+  //     name: existingUser.username,
+  //     status: existingSubscription?.status || "pending_payment",
+  //   };
+  // }
+
+  // const createdUser = await sequelize.transaction(async (transaction) => {
+  //   const user = await Users.create(
+  //     {
+  //       email: email,
+  //       username: username,
+  //       authProvider: "google",
+  //       providerUserId: providerUserId,
+  //     },
+  //     { transaction },
+  //   );
+
+  //   await Subscriptions.create(
+  //     {
+  //       userId: user.userId,
+  //       status: "pending_payment",
+  //     },
+  //     { transaction },
+  //   );
+
+  //   return user;
+  // });
+
+  // return {
+  //   id: createdUser.userId,
+  //   email: createdUser.email,
+  //   name: createdUser.username,
+  //   status: "pending_payment",
+  // };
 };
 
 if (oauthEnabled) {
@@ -150,7 +228,7 @@ if (oauthEnabled) {
 router.post("/api/webhook", async (req, res) => {
   if (!stripeEnabled || !stripe) {
     return res.status(503).json({
-      message: "Stripe is not configured. Set STRIPE_* environment variables.",
+      error: "Stripe is not configured. Set STRIPE_* environment variables.",
     });
   }
 
@@ -177,7 +255,7 @@ router.post("/api/webhook", async (req, res) => {
 
       if (!Number.isInteger(userId)) {
         return res.status(400).json({
-          message: "checkout.session.completed missing valid user reference",
+          error: "checkout.session.completed missing valid user reference",
         });
       }
 
@@ -199,7 +277,7 @@ router.post("/api/webhook", async (req, res) => {
       );
     }
   } catch (error) {
-    return res.status(500).json({ message: "Failed to process webhook event" });
+    return res.status(500).json({ error: "Failed to process webhook event" });
   }
 
   return res.json({ received: true });
@@ -208,7 +286,7 @@ router.post("/api/webhook", async (req, res) => {
 router.get("/auth/google", (req, res, next) => {
   if (!oauthEnabled) {
     return res.status(503).json({
-      message:
+      error:
         "Google OAuth is not configured. Set GOOGLE_* environment variables.",
     });
   }
@@ -230,10 +308,7 @@ router.get("/auth/google/callback", (req, res, next) => {
   })(req, res, () => {
     const token = jwt.sign(
       {
-        id: req.user.id,
-        email: req.user.email,
-        name: req.user.name,
-        status: req.user.status,
+        userId: req.user.userId,
       },
       JWT_SECRET,
       { expiresIn: "1h" },
@@ -252,42 +327,54 @@ router.get("/auth/google/callback", (req, res, next) => {
 
 router.get("/api/me", authenticateToken, async (req, res) => {
   try {
-    const currentSubscription = await Subscriptions.findOne({
-      where: { userId: req.user.id },
+    const subscription = await Subscriptions.findOne({
+      where: { userId: req.user.userId },
     });
-
-    const currentStatus = currentSubscription?.status || "pending_payment";
-    if (currentStatus !== req.user.status) {
-      const token = jwt.sign(
-        {
-          id: req.user.id,
-          email: req.user.email,
-          name: req.user.name,
-          status: currentStatus,
-        },
-        JWT_SECRET,
-        { expiresIn: "1h" },
-      );
-
-      res.cookie("token", token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 3600000,
-      });
-    }
 
     return res.json({
       user: {
-        id: req.user.id,
+        userId: req.user.userId,
         email: req.user.email,
-        name: req.user.name,
-        status: currentStatus,
+        username: req.user.username,
+        subscriptionStatus: subscription?.status || "pending_payment",
       },
     });
   } catch (error) {
-    return res.status(500).json({ message: "Internal server error" });
+    console.error(error);
+    return res.status(500).json({ error: "Internal server error" });
   }
+
+  // // remove: old code
+  // const currentSubscription = await Subscriptions.findOne({
+  //   where: { userId: req.user.userId },
+  // });
+
+  // const currentStatus = currentSubscription?.status || "pending_payment";
+  // if (currentStatus !== req.user.status) {
+  //   const token = jwt.sign(
+  //     {
+  //       id: req.user.userId,
+  //     },
+  //     JWT_SECRET,
+  //     { expiresIn: "1h" },
+  //   );
+
+  //   res.cookie("token", token, {
+  //     httpOnly: true,
+  //     secure: process.env.NODE_ENV === "production",
+  //     sameSite: "lax",
+  //     maxAge: 3600000,
+  //   });
+  // }
+
+  // return res.json({
+  //   user: {
+  //     id: req.user.userId,
+  //     email: req.user.email,
+  //     name: req.user.name,
+  //     status: currentStatus,
+  //   },
+  // });
 });
 
 router.post(
@@ -296,8 +383,7 @@ router.post(
   async (req, res) => {
     if (!stripeEnabled || !stripe) {
       return res.status(503).json({
-        message:
-          "Stripe is not configured. Set STRIPE_* environment variables.",
+        error: "Stripe is not configured. Set STRIPE_* environment variables.",
       });
     }
 
@@ -306,10 +392,10 @@ router.post(
         payment_method_types: ["card"],
         mode: "subscription",
         line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
-        client_reference_id: String(req.user.id),
+        client_reference_id: String(req.user.userId),
         customer_email: req.user.email,
         metadata: {
-          user_id: String(req.user.id),
+          user_id: String(req.user.userId),
         },
         success_url: `${frontendUrl}/?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${frontendUrl}/?checkout=canceled`,
@@ -325,7 +411,7 @@ router.post(
 router.get("/api/checkout/confirm", authenticateToken, async (req, res) => {
   if (!stripeEnabled || !stripe) {
     return res.status(503).json({
-      message: "Stripe is not configured. Set STRIPE_* environment variables.",
+      error: "Stripe is not configured. Set STRIPE_* environment variables.",
     });
   }
 
@@ -333,7 +419,7 @@ router.get("/api/checkout/confirm", authenticateToken, async (req, res) => {
   if (!sessionId) {
     return res
       .status(400)
-      .json({ message: "Missing session_id query parameter." });
+      .json({ error: "Missing session_id query parameter." });
   }
 
   try {
@@ -342,9 +428,12 @@ router.get("/api/checkout/confirm", authenticateToken, async (req, res) => {
       checkoutSession.client_reference_id || checkoutSession.metadata?.user_id,
     );
 
-    if (!Number.isInteger(referenceUserId) || referenceUserId !== req.user.id) {
+    if (
+      !Number.isInteger(referenceUserId) ||
+      referenceUserId !== req.user.userId
+    ) {
       return res.status(403).json({
-        message: "Checkout session does not belong to the authenticated user.",
+        error: "Checkout session does not belong to the authenticated user.",
       });
     }
 
@@ -354,7 +443,7 @@ router.get("/api/checkout/confirm", authenticateToken, async (req, res) => {
 
     if (!isPaid || !checkoutSession.subscription) {
       return res.status(409).json({
-        message: "Checkout is not completed yet. Please refresh in a moment.",
+        error: "Checkout is not completed yet. Please refresh in a moment.",
       });
     }
 
@@ -364,20 +453,20 @@ router.get("/api/checkout/confirm", authenticateToken, async (req, res) => {
         stripeCustomerId: checkoutSession.customer,
         stripeSubscriptionId: checkoutSession.subscription,
       },
-      { where: { userId: req.user.id } },
+      { where: { userId: req.user.userId } },
     );
 
     return res.json({ status: "active" });
   } catch (error) {
     return res
       .status(500)
-      .json({ message: "Unable to confirm checkout session." });
+      .json({ error: "Unable to confirm checkout session." });
   }
 });
 
 router.get("/auth/logout", (req, res) => {
   res.clearCookie("token");
-  return res.json({ message: "Logged out successfully" });
+  return res.json({ error: "Logged out successfully" });
 });
 
 router.get(

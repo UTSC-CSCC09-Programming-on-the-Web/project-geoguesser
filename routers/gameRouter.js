@@ -1,9 +1,7 @@
 import { Router } from "express";
 import { sequelize } from "../database/datasource.js";
 import { Op } from "sequelize";
-import { Locations } from "../database/models/locations.js";
-import { Games } from "../database/models/games.js";
-import { Rounds } from "../database/models/rounds.js";
+import { Locations, Games, Rounds } from "../database/models/models.js";
 import { calculateDistance } from "../utility/distance.js";
 
 export const gameRouter = Router();
@@ -11,6 +9,9 @@ export const gameRouter = Router();
 // Finds, and returns, game and round in progress for current user. If current round is non-existent, creates new game and round, and returns that.
 // Returns {gameId, imageId, roundId, roundNumber}
 gameRouter.post("/start", async (req, res) => {
+  // remove (debugging)
+  console.log("User logged in is: ", req.user);
+
   const userId = req.user.userId;
 
   try {
@@ -264,10 +265,12 @@ async function randomLocation(locationsArray = [], transaction) {
     }
 
     // find a location different from the ones previously seen
+    const locationWhere = locationsArray.length > 0
+      ? { imageId: { [Op.notIn]: locationsArray } }
+      : undefined;
+
     const unusedLocation = await Locations.findOne({
-      where: {
-        imageId: { [Op.notIn]: locationsArray },
-      },
+      where: locationWhere,
       order: sequelize.literal("RANDOM()"),
       transaction,
     });

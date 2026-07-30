@@ -20,8 +20,7 @@ async function startGame() {
 
     await loadRound(result);
   } catch (error) {
-    console.log(error);
-    alert("Unable to start the game");
+    console.error(error);
   }
 }
 

@@ -116,6 +116,7 @@ async function submitGuess() {
     document.querySelector("#yourGuess").textContent = formatCoordinate(
       result.guessLocation,
     );
+
     document.querySelector("#actualLocation").textContent = formatCoordinate(
       result.actualLocation,
     );

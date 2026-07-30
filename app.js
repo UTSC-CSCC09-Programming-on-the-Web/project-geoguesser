@@ -38,6 +38,7 @@ app.use(
   requireActiveSubscription,
   streetviewRouter,
 );
+app.use("/games", authenticateToken, requireActiveSubscription, gameRouter);
 
 try {
   await sequelize.authenticate();

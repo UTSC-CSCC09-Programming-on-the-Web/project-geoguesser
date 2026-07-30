@@ -8,7 +8,7 @@ const accessGate = document.querySelector("#accessGate");
 const accessGateMessage = document.querySelector("#accessGateMessage");
 
 const updateAccessState = (user) => {
-  const canPlay = Boolean(user && user.status === "active");
+  const canPlay = Boolean(user && user.subscriptionStatus === "active");
   const message = !user
     ? "Sign in with Google, then complete checkout to unlock gameplay."
     : "Your subscription is pending. Complete checkout to unlock gameplay.";
@@ -28,7 +28,7 @@ const updateAccessState = (user) => {
 };
 
 const updateGateUi = (user) => {
-  const canPlay = Boolean(user && user.status === "active");
+  const canPlay = Boolean(user && user.subscriptionStatus === "active");
   gameLayout.classList.toggle("locked", !canPlay);
   accessGate.classList.toggle("hidden", canPlay);
 
@@ -51,10 +51,10 @@ const setAuthUi = (user) => {
     return;
   }
 
-  const isSubscribed = user.status === "active";
+  const isSubscribed = user.subscriptionStatus === "active";
   authStatus.textContent = isSubscribed
-    ? `Logged in as ${user.name} (subscription active)`
-    : `Logged in as ${user.name} (subscription required)`;
+    ? `Logged in as ${user.username} (subscription active)`
+    : `Logged in as ${user.username} (subscription required)`;
 
   loginButton.classList.add("hidden");
   logoutButton.classList.remove("hidden");

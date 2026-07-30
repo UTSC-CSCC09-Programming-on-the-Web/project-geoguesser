@@ -26,6 +26,10 @@ export const Locations = sequelize.define(
         max: 180,
       },
     },
+    location: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
   },
   // table name in postgres
   { tableName: "Locations", timestamps: false },
