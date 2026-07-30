@@ -55,6 +55,12 @@ body {
   /* overflow: hidden; */
 }
 
+.game-container.game-layout-invisible .game-layout {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .game-layout {
   display: grid;
   grid-template-columns: 1fr 1fr;

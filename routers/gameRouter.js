@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { sequelize } from "../database/datasource.js";
+import { Op } from "sequelize";
 import { Locations } from "../database/models/locations.js";
 import { Games } from "../database/models/games.js";
 import { Rounds } from "../database/models/rounds.js";
@@ -61,7 +62,7 @@ gameRouter.post("/start", async (req, res) => {
       // user does not have a game in progress
       else {
         // #region get random location
-        const location = await randomLocation(transaction);
+        const location = await randomLocation([], transaction);
 
         if (!location) {
           throw new Error("Unable to generate randomized location");
@@ -168,6 +169,9 @@ gameRouter.post("/:gameId/rounds/:roundId/guess", async (req, res) => {
       const guessLngValid =
         Number.isFinite(guessLng) && guessLng >= -180 && guessLng <= 180;
 
+      // remove:
+      console.log(`coordinates guessed on backend: ${guessLat}, ${guessLng}`);
+
       if (!guessLatValid || !guessLngValid) {
         throw new Error("Coordinates guessed are not valid");
       }
@@ -191,7 +195,17 @@ gameRouter.post("/:gameId/rounds/:roundId/guess", async (req, res) => {
       // if another round needs to be played, create new round
       if (round.roundNumber < 3) {
         // #region get random location
-        const location = await randomLocation(transaction);
+        // generate all previous rounds corresponding to this game
+        const previousRounds = await Rounds.findAll({
+          where: { gameId: round.gameId },
+          attributes: ["imageId"],
+          transaction,
+        });
+
+        // array of image ids used in this round
+        const usedImageIds = previousRounds.map((round) => round.imageId);
+
+        const location = await randomLocation(usedImageIds, transaction);
 
         if (!location) {
           throw new Error("Unable to generate randomized location");
@@ -239,11 +253,32 @@ gameRouter.post("/:gameId/rounds/:roundId/guess", async (req, res) => {
   }
 });
 
-// Returns random location. Returns a Promise, so use `await`
-async function randomLocation(transaction) {
-  // note: returns a Promise
-  return Locations.findOne({
-    order: sequelize.literal("RANDOM()"),
-    transaction: transaction,
-  });
+// Returns random location not seen before.
+async function randomLocation(locationsArray = [], transaction) {
+  try {
+    // check if locationsArray is an array
+    if (!Array.isArray(locationsArray)) {
+      throw new Error(
+        "Please pass a valid array for locationsArray parameter for randomLocation",
+      );
+    }
+
+    // find a location different from the ones previously seen
+    const unusedLocation = await Locations.findOne({
+      where: {
+        imageId: { [Op.notIn]: locationsArray },
+      },
+      order: sequelize.literal("RANDOM()"),
+      transaction,
+    });
+
+    if (!unusedLocation) {
+      throw new Error("Was not able to find an unused location");
+    } else {
+      return unusedLocation;
+    }
+  } catch (error) {
+    console.log("Failed to fetch random location", error);
+    throw error;
+  }
 }

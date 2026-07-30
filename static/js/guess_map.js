@@ -46,13 +46,18 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#playAgainBtn").addEventListener("click", playAgain);
 });
 
+function normalizeLongitude(lng) {
+  const normalized = ((((lng + 180) % 360) + 360) % 360) - 180;
+  return normalized === -180 ? 180 : normalized;
+}
+
 function updateGuessClick(event) {
   if (!gameplayEnabled) {
     return;
   }
 
   const lat = event.latlng.lat;
-  const lng = event.latlng.lng;
+  const lng = normalizeLongitude(event.latlng.lng);
 
   currentGuess = { lat, lng };
 
@@ -128,6 +133,9 @@ async function submitGuess() {
 
     // display results section
     document.querySelector("#resultsSection").classList.remove("hidden");
+
+    // hide game container underneath
+    gameLayoutInvisible(true);
   } catch (error) {
     console.error(error);
     alert(error.message);
@@ -141,8 +149,8 @@ async function submitGuess() {
 async function goToNextRound() {
   // hide results section
   const resultsSection = document.querySelector("#resultsSection");
-
   resultsSection.classList.add("hidden");
+
   destroyResultMap();
 
   // if there is no round data for the next round, we completed the final round
@@ -156,6 +164,9 @@ async function goToNextRound() {
     pendingRoundData = null;
 
     resetGuessMap();
+
+    // show game container
+    gameLayoutInvisible(false);
 
     try {
       await loadRound(nextRound);
@@ -180,6 +191,9 @@ function resetGuessMap() {
 async function playAgain() {
   document.querySelector("#gameOverSection").classList.add("hidden");
   destroyResultMap();
+
+  // show game container
+  gameLayoutInvisible(false);
 
   resetGuessMap();
   pendingRoundData = null;
@@ -221,19 +235,22 @@ function renderResultMap(guessLocation, actualLocation) {
   const guessLatLng = L.latLng(guessLocation.lat, guessLocation.lng);
   const actualLatLng = L.latLng(actualLocation.lat, actualLocation.lng);
 
+  // draw line between guess and actual location
   resultLine = L.polyline([guessLatLng, actualLatLng], {
     color: "#3b82f6",
     weight: 3,
     opacity: 0.8,
   }).addTo(resultMap);
 
+  // mark the guess
   resultGuessMarker = L.circleMarker(guessLatLng, {
     radius: 8,
-    color: "#f59e0b",
-    fillColor: "#f59e0b",
+    color: "#c93b45",
+    fillColor: "#c93b45",
     fillOpacity: 0.95,
   }).addTo(resultMap);
 
+  // mark the actual location
   resultActualMarker = L.circleMarker(actualLatLng, {
     radius: 8,
     color: "#10b981",
@@ -241,8 +258,12 @@ function renderResultMap(guessLocation, actualLocation) {
     fillOpacity: 0.95,
   }).addTo(resultMap);
 
+  // make the result map zoomed around the guess and actual coordinates
   const bounds = L.latLngBounds([guessLatLng, actualLatLng]);
-  resultMap.fitBounds(bounds, { padding: [32, 32] });
+  resultMap.fitBounds(bounds, {
+    padding: [40, 40],
+    maxZoom: 3,
+  });
 
   requestAnimationFrame(() => {
     resultMap.invalidateSize();
@@ -258,6 +279,14 @@ function destroyResultMap() {
   resultGuessMarker = null;
   resultActualMarker = null;
   resultLine = null;
+}
+
+function gameLayoutInvisible(isInvisible) {
+  const gameContainer = document.querySelector(".game-container");
+
+  if (gameContainer) {
+    gameContainer.classList.toggle("game-layout-invisible", isInvisible);
+  }
 }
 
 const aiReviewButton = document.querySelector("#aiReviewButton");
