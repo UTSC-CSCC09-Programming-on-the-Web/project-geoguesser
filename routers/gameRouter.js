@@ -6,6 +6,42 @@ import { calculateDistance } from "../utility/distance.js";
 
 export const gameRouter = Router();
 
+// Calculates and returns total distance between guesses and actual locations for gameId.
+gameRouter.get("/:gameId/score", async (req, res) => {
+  const gameId = Number(req.params.gameId);
+
+  const gameIdValid = Number.isInteger(gameId) && gameId >= 0;
+
+  if (!gameIdValid) {
+    return res.status(400).json({ error: "Pass a valid gameId." });
+  }
+
+  // TODO: calculate total distance between guesses and actual locations for gameId.
+  try {
+    const rounds = await Rounds.findAll({
+      where: { gameId },
+      attributes: ["distance"],
+    });
+
+    if (rounds.length !== 3) {
+      return res.status(404).json({
+        error: `Did not find all three rounds corresponding to game with gameId: ${gameId}`,
+      });
+    }
+
+    const totalDistance = rounds.reduce((accumulator, round) => {
+      return accumulator + round.distance;
+    }, 0);
+
+    return res.json({ totalDistance });
+  } catch (error) {
+    console.error("Unable to calculate total distance:", error);
+    return res
+      .status(500)
+      .json({ error: "Failed to calculate total distance for game" });
+  }
+});
+
 // Finds, and returns, game and round in progress for current user. If current round is non-existent, creates new game and round, and returns that.
 // Returns {gameId, imageId, roundId, roundNumber}
 gameRouter.post("/start", async (req, res) => {
@@ -265,9 +301,10 @@ async function randomLocation(locationsArray = [], transaction) {
     }
 
     // find a location different from the ones previously seen
-    const locationWhere = locationsArray.length > 0
-      ? { imageId: { [Op.notIn]: locationsArray } }
-      : undefined;
+    const locationWhere =
+      locationsArray.length > 0
+        ? { imageId: { [Op.notIn]: locationsArray } }
+        : undefined;
 
     const unusedLocation = await Locations.findOne({
       where: locationWhere,

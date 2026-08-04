@@ -93,11 +93,26 @@
               <button class="btn btn-primary" id="submitGuessButton">
                 Submit Guess
               </button>
-              <button class="btn btn-secondary" id="aiReviewButton">
+              <button class="btn btn-secondary" id="aiReviewButton" disabled>
                 AI Review
               </button>
-              <button class="btn btn-secondary" id="hintButton">Hint</button>
+              <button class="btn btn-secondary" id="hintButton" disabled>
+                Hint
+              </button>
             </div>
+
+            <aside
+              class="hint-card hidden"
+              id="hintCard"
+              role="status"
+              aria-live="polite"
+            >
+              <div class="hint-card-header">
+                <span class="hint-icon" aria-hidden="true">Hint</span>
+                <h3>Location hint</h3>
+              </div>
+              <p id="hintText"></p>
+            </aside>
           </section>
         </div>
 
@@ -149,16 +164,13 @@
           <div class="game-over-content">
             <h2>Game Over!</h2>
 
-            <!-- remove -->
             <div class="final-score">
               <p class="final-score-label">Final Score</p>
               <p class="final-score-value" id="finalScore">0</p>
             </div>
 
-            <!-- remove -->
-            <div class="score-breakdown" id="scoreBreakdown">
-              <!-- Round scores will be displayed here -->
-            </div>
+            <!-- Round scores will be displayed here -->
+            <!-- <div class="score-breakdown" id="scoreBreakdown"></div> -->
 
             <div class="button-group">
               <button class="btn btn-primary" id="playAgainBtn">

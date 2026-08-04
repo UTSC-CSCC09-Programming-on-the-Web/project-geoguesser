@@ -1,4 +1,3 @@
-import dotenv from "dotenv";
 import { calculateDistance } from "../utility/distance.js";
 import { Locations } from "../database/models/locations.js";
 import { Router } from "express";
@@ -7,8 +6,6 @@ import { sequelize } from "../database/datasource.js";
 export const streetviewRouter = Router();
 
 // #region read environment variables
-dotenv.config();
-
 const { MAPILLARY_ACCESS_TOKEN, GEMINI_MODEL, GEMINI_API_KEY } = process.env;
 // #endregion
 
@@ -38,6 +35,7 @@ streetviewRouter.post("/ai-review", async (req, res) => {
   try {
     // convert imageId to string (preserves ID exactly since large IDs may fall out of integer range)
     const imageId = String(req.body.imageId ?? "").trim();
+    const mode = req.body.mode === "hint" ? "hint" : "review";
 
     // use regex to test if imageId is all digits only
     if (!/^\d+$/.test(imageId)) {
@@ -94,6 +92,13 @@ streetviewRouter.post("/ai-review", async (req, res) => {
     // Useful to send in our API call
     const base64Image = imageBuffer.toString("base64");
 
+    // instructions to pass to AI
+    const aiInstructionForHint =
+      "You are a GeoGuesser coach. Analyze this image and give the player a useful location hint.Give exactly 1 to 3 concise sentences about where this location might be. Use visible clues such as signs, language, road markings, architecture, vegetation, utility poles, vehicles, license plates, and road quality. Indicate a region, or broad climate/landscape clue. Do not provide an exact city or country. Do not reveal GPS coordinates or hidden metadata. Be honest about uncertainty and do not state an unsupported exact location.";
+
+    const aiInstructionForReview =
+      "You are a GeoGuesser coach. Analyze this image and give a concise review of how the player could have guessed the geographic location of the image. Use all visible indicators from the image. This includes signs, businesses, road markings, architecture, vegetation, utility poles, vehicles, license plates, language, people, and road quality. Do not use GPS or hidden image metadata.";
+
     // #region Gemini API call
     const rawGeminiResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
@@ -110,12 +115,10 @@ streetviewRouter.post("/ai-review", async (req, res) => {
               parts: [
                 { inline_data: { mimeType: mimeType, data: base64Image } },
                 {
-                  text: `You are a GeoGuesser coach.  Analyze this image and give a concise review of how the player could have guessed the geographic location of the image.
-
-                Use all visible indicators from the image. This includes signs, businesses, road markings, architecture, vegetation, utility poles, vehicles, license plates, language, people, and road quality.
-
-                Do not use GPS or hidden image metadata.                
-                `,
+                  text:
+                    mode === "hint"
+                      ? aiInstructionForHint
+                      : aiInstructionForReview,
                 },
               ],
             },
@@ -144,7 +147,7 @@ streetviewRouter.post("/ai-review", async (req, res) => {
       return res.status(502).json({ error: "Gemini returned an empty review" });
     }
 
-    return res.json({ review: review });
+    return res.json({ text: review });
     // #endregion
   } catch (error) {
     console.log("AI review error: ", error);

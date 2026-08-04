@@ -1,13 +1,18 @@
 "use strict";
 
+// #region game variables
 // map object to be displayed
 let guessMap;
+
 // current guess = {lat, lng}
 let currentGuess = null;
+
 // marker for guess on map
 let guessMarker;
+
 // holds round data for next round
 let pendingRoundData = null;
+
 // variables for displaying result on map
 let resultMap;
 let resultGuessMarker;
@@ -16,6 +21,7 @@ let resultLine;
 
 // whether gameplay is allowed or not
 let gameplayEnabled = false;
+// #endregion
 
 window.addEventListener("geoguesser-access-changed", (event) => {
   gameplayEnabled = event.detail.canPlay;
@@ -145,7 +151,6 @@ async function submitGuess() {
     submitGuessButton.textContent = "Submit Guess";
   }
 }
-// #endregion
 
 async function goToNextRound() {
   // hide results section
@@ -156,15 +161,14 @@ async function goToNextRound() {
 
   // if there is no round data for the next round, we completed the final round
   if (!pendingRoundData) {
-    document.querySelector("#gameOverSection").classList.remove("hidden");
-
-    return;
+    endGameScreen();
   } else {
     // store pendingRoundData and reset it
     const nextRound = pendingRoundData;
     pendingRoundData = null;
 
     resetGuessMap();
+    resetHint();
 
     // show game container
     gameLayoutInvisible(false);
@@ -178,6 +182,21 @@ async function goToNextRound() {
       alert("Unable to load the next round");
     }
   }
+}
+
+function endGameScreen() {
+  document.querySelector("#gameOverSection").classList.remove("hidden");
+  const finalScoreDisplay = document.querySelector("#finalScore");
+
+  fetch(`/games/${window.gameId}/score`)
+    .then((response) => {
+      return response.json();
+    })
+    .then((result) => {
+      finalScoreDisplay.textContent = `${result.totalDistance.toFixed(2)} km`;
+    });
+
+  return;
 }
 
 function resetGuessMap() {
@@ -197,6 +216,7 @@ async function playAgain() {
   gameLayoutInvisible(false);
 
   resetGuessMap();
+  resetHint();
   pendingRoundData = null;
 
   document.querySelector("#submitGuessButton").disabled = false;
@@ -290,6 +310,7 @@ function gameLayoutInvisible(isInvisible) {
   }
 }
 
+// #region ai-review button
 const aiReviewButton = document.querySelector("#aiReviewButton");
 aiReviewButton.addEventListener("click", async () => {
   if (!gameplayEnabled) {
@@ -304,7 +325,7 @@ aiReviewButton.addEventListener("click", async () => {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     // sending imageId as string to ensure ID is preserved (int might overflow)
-    body: JSON.stringify({ imageId: window.imageId }),
+    body: JSON.stringify({ imageId: window.imageId, mode: "review" }),
   });
 
   const aiReview = await response.json();
@@ -312,6 +333,59 @@ aiReviewButton.addEventListener("click", async () => {
   if (!response.ok) {
     throw new Error(`Request to /streetview/ai-review failed.`, aiReview.error);
   } else {
-    console.log(aiReview.review);
+    console.log(aiReview.text);
   }
 });
+// #endregion
+
+// #region ai-hint button
+const hintButton = document.querySelector("#hintButton");
+const hintCard = document.querySelector("#hintCard");
+const hintText = document.querySelector("#hintText");
+hintButton.addEventListener("click", async () => {
+  if (!gameplayEnabled) {
+    alert("Gameplay is locked until your subscription is active.");
+    return;
+  }
+
+  if (!window.imageId) {
+    alert("No streetview image loaded yet");
+    return;
+  }
+
+  hintButton.disabled = true;
+  hintButton.textContent = "Thinking ...";
+  hintCard.classList.remove("hidden");
+  hintText.textContent = "Analyzing the visible clues ...";
+
+  try {
+    const response = await fetch("/streetview/ai-review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageId: window.imageId, mode: "hint" }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Unable to generate a hint");
+    }
+
+    hintText.textContent = result.text;
+    hintButton.textContent = "Hint Used";
+  } catch (error) {
+    console.log(error);
+    hintCard.classList.add("hidden");
+    hintText.textContent = "";
+    hintButton.disabled = false;
+    hintButton.textContent = "Hint";
+  }
+});
+// #endregion
+
+function resetHint() {
+  hintCard.classList.add("hidden");
+  hintText.textContent = "Hint";
+  hintButton.disabled = !gameplayEnabled;
+  hintButton.textContent = "Hint";
+}
