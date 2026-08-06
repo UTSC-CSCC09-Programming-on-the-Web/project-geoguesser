@@ -45,9 +45,6 @@ gameRouter.get("/:gameId/score", async (req, res) => {
 // Finds, and returns, game and round in progress for current user. If current round is non-existent, creates new game and round, and returns that.
 // Returns {gameId, imageId, roundId, roundNumber}
 gameRouter.post("/start", async (req, res) => {
-  // remove (debugging)
-  console.log("User logged in is: ", req.user);
-
   const userId = req.user.userId;
 
   try {
@@ -142,7 +139,7 @@ gameRouter.post("/start", async (req, res) => {
 });
 
 // Submits guess coordinates for a specified game and round. Then either marks game complete (if it was round three) or creates and returns new round info.
-// Returns {distance, newRoundData} where newRoundData is undefined if game got completed, or is newRoundData = {gameId, imageId, roundId, roundNumber}
+// Returns {distance, guessLocation, actualLocation, newRoundData} where newRoundData is undefined if game got completed, or is newRoundData = {gameId, imageId, roundId, roundNumber} of next round
 // distance corresponds to distance of guess from actual location
 gameRouter.post("/:gameId/rounds/:roundId/guess", async (req, res) => {
   // #region read request variables
@@ -175,7 +172,7 @@ gameRouter.post("/:gameId/rounds/:roundId/guess", async (req, res) => {
           {
             model: Locations,
             as: "location",
-            attributes: ["lat", "lng"],
+            attributes: ["lat", "lng", "location"],
             required: true,
           },
         ],
@@ -205,9 +202,6 @@ gameRouter.post("/:gameId/rounds/:roundId/guess", async (req, res) => {
         Number.isFinite(guessLat) && guessLat >= -90 && guessLat <= 90;
       const guessLngValid =
         Number.isFinite(guessLng) && guessLng >= -180 && guessLng <= 180;
-
-      // remove:
-      console.log(`coordinates guessed on backend: ${guessLat}, ${guessLng}`);
 
       if (!guessLatValid || !guessLngValid) {
         throw new Error("Coordinates guessed are not valid");
@@ -277,7 +271,11 @@ gameRouter.post("/:gameId/rounds/:roundId/guess", async (req, res) => {
       return {
         distance,
         guessLocation: { lat: guessLat, lng: guessLng },
-        actualLocation: { lat: round.location.lat, lng: round.location.lng },
+        actualLocation: {
+          lat: round.location.lat,
+          lng: round.location.lng,
+          location: round.location.location,
+        },
         newRoundData,
       };
     });

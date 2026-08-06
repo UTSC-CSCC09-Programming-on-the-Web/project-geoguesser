@@ -1,71 +1,620 @@
 import { Locations } from "./models/models.js";
 import { sequelize } from "./datasource.js";
 
+// old locations array
+// const locations = [
+//   // Toronto, Canada
+//   {
+//     imageId: "339131707727137",
+//     lat: 43.745436415377014,
+//     lng: -79.32577136585002,
+//     location: "Toronto, Canada",
+//   },
+//   //   Tokyo, Japan
+//   {
+//     imageId: "3812153535576812",
+//     lat: 35.690605863076,
+//     lng: 139.70296007154002,
+//     location: "Tokyo, Japan",
+//   },
+//   //   Bangkok, Thailand
+//   {
+//     imageId: "1395118605995100",
+//     lat: 13.736635360000008,
+//     lng: 100.56136070000002,
+//     location: "Bangkok, Thailand",
+//   },
+//   // Barcelona, Spain
+//   {
+//     imageId: "908360824242642",
+//     lat: 41.37166725884299,
+//     lng: 2.175676421211733,
+//     location: "Barcelona, Spain",
+//   },
+//   // Seoul, South Korea
+//   {
+//     imageId: "393159296921495",
+//     lat: 37.579524167366,
+//     lng: 126.97681961003002,
+//     location: "Seoul, South Korea",
+//   },
+//   // Moscow, Russia
+//   {
+//     imageId: "830149160943423",
+//     lat: 55.757332401726984,
+//     lng: 37.61494240672005,
+//     location: "Moscow, Russia",
+//   },
+
+//   // London, England
+//   {
+//     imageId: "2109402169919163",
+//     lat: 51.50706240090301,
+//     lng: -0.125313198404001,
+//     location: "London, England",
+//   },
+
+//   // Cape Town, South Africa
+//   {
+//     imageId: "303826081367579",
+//     lat: -33.92190803236305,
+//     lng: 18.41606653285703,
+//     location: "Cape Town, South Africa",
+//   },
+
+//   // Rio de Janeiro, Brazil
+//   {
+//     imageId: "761125847905746",
+//     lat: -22.986703637836,
+//     lng: -43.198893265295,
+//     location: "Rio de Janeiro, Brazil",
+//   },
+
+//   // Havana, Cuba
+
+//   // Kiev, Ukraine
+// ];
+
 const locations = [
-  // Toronto, Canada
   {
     imageId: "339131707727137",
     lat: 43.745436415377014,
     lng: -79.32577136585002,
     location: "Toronto, Canada",
+    url: "https://www.mapillary.com/app/?lat=43.745436415377014&lng=-79.32577136585002&z=17&pKey=339131707727137&focus=photo",
   },
-  //   Tokyo, Japan
   {
     imageId: "3812153535576812",
     lat: 35.690605863076,
     lng: 139.70296007154002,
     location: "Tokyo, Japan",
+    url: "https://www.mapillary.com/app/?lat=35.690605863076&lng=139.70296007154002&z=17&pKey=3812153535576812&focus=photo",
   },
-  //   Bangkok, Thailand
   {
     imageId: "1395118605995100",
     lat: 13.736635360000008,
     lng: 100.56136070000002,
     location: "Bangkok, Thailand",
+    url: "https://www.mapillary.com/app/?lat=13.736635360000008&lng=100.56136070000002&z=17&pKey=1395118605995100&focus=photo",
   },
-  // Barcelona, Spain
   {
     imageId: "908360824242642",
     lat: 41.37166725884299,
     lng: 2.175676421211733,
     location: "Barcelona, Spain",
+    url: "https://www.mapillary.com/app/?lat=41.37166725884299&lng=2.175676421211733&z=17&pKey=908360824242642&focus=photo",
   },
-  // Seoul, South Korea
   {
     imageId: "393159296921495",
     lat: 37.579524167366,
     lng: 126.97681961003002,
     location: "Seoul, South Korea",
+    url: "https://www.mapillary.com/app/?lat=37.579524167366&lng=126.97681961003002&z=17&pKey=393159296921495&focus=photo",
   },
-  // Moscow, Russia
   {
     imageId: "830149160943423",
     lat: 55.757332401726984,
     lng: 37.61494240672005,
     location: "Moscow, Russia",
+    url: "https://www.mapillary.com/app/?lat=55.757332401726984&lng=37.61494240672005&z=17&pKey=830149160943423&focus=photo",
   },
-
-  // London, England
   {
     imageId: "2109402169919163",
     lat: 51.50706240090301,
     lng: -0.125313198404001,
     location: "London, England",
+    url: "https://www.mapillary.com/app/?lat=51.50706240090301&lng=-0.125313198404001&z=17&pKey=2109402169919163&focus=photo",
   },
-
-  // Cape Town, South Africa
   {
-    imageId: 303826081367579,
+    imageId: "303826081367579",
     lat: -33.92190803236305,
     lng: 18.41606653285703,
     location: "Cape Town, South Africa",
+    url: "https://www.mapillary.com/app/?lat=-33.92190803236305&lng=18.41606653285703&z=17&pKey=303826081367579&focus=photo",
   },
-
-  // Rio de Janeiro, Brazil
-
-  // Havana, Cuba
-
-  // Kiev, Ukraine
+  {
+    imageId: "761125847905746",
+    lat: -22.986703637836,
+    lng: -43.198893265295,
+    location: "Rio de Janeiro, Brazil",
+    url: "https://www.mapillary.com/app/?lat=-22.986703637836&lng=-43.198893265295&z=17&pKey=761125847905746&focus=photo",
+  },
+  {
+    imageId: "288129893044166",
+    lat: 48.857299378519,
+    lng: 2.3522109140741,
+    location: "Paris, France",
+    url: "https://www.mapillary.com/app/?lat=48.857299378519&lng=2.3522109140741&z=17&pKey=288129893044166&focus=photo",
+  },
+  {
+    imageId: "1282951149329174",
+    lat: 19.433429,
+    lng: -99.132789300002,
+    location: "Mexico City, Mexico",
+    url: "https://www.mapillary.com/app/?lat=19.433429&lng=-99.132789300002&z=17&pKey=1282951149329174&focus=photo",
+  },
+  {
+    imageId: "1026428695953569",
+    lat: -34.6029358,
+    lng: -58.3812847,
+    location: "Buenos Aires, Argentina",
+    url: "https://www.mapillary.com/app/?lat=-34.6029358&lng=-58.3812847&z=17&pKey=1026428695953569&focus=photo",
+  },
+  {
+    imageId: "198047616225116",
+    lat: -12.046731,
+    lng: -77.042046,
+    location: "Lima, Peru",
+    url: "https://www.mapillary.com/app/?lat=-12.046731&lng=-77.042046&z=17&pKey=198047616225116&focus=photo",
+  },
+  {
+    imageId: "1005324775673968",
+    lat: 4.7114392576923,
+    lng: -74.07192055,
+    location: "Bogota, Colombia",
+    url: "https://www.mapillary.com/app/?lat=4.7114392576923&lng=-74.07192055&z=17&pKey=1005324775673968&focus=photo",
+  },
+  {
+    imageId: "136743298475535",
+    lat: -34.900380922472,
+    lng: -56.164481872694,
+    location: "Montevideo, Uruguay",
+    url: "https://www.mapillary.com/app/?lat=-34.900380922472&lng=-56.164481872694&z=17&pKey=136743298475535&focus=photo",
+  },
+  {
+    imageId: "214676270189311",
+    lat: 5.6035136999988,
+    lng: -0.1871945,
+    location: "Accra, Ghana",
+    url: "https://www.mapillary.com/app/?lat=5.6035136999988&lng=-0.1871945&z=17&pKey=214676270189311&focus=photo",
+  },
+  {
+    imageId: "1078746822621440",
+    lat: 34.0210764483,
+    lng: -6.8413525354,
+    location: "Rabat, Morocco",
+    url: "https://www.mapillary.com/app/?lat=34.0210764483&lng=-6.8413525354&z=17&pKey=1078746822621440&focus=photo",
+  },
+  {
+    imageId: "2806658839647106",
+    lat: 9.0327683,
+    lng: 38.7460108,
+    location: "Addis Ababa, Ethiopia",
+    url: "https://www.mapillary.com/app/?lat=9.0327683&lng=38.7460108&z=17&pKey=2806658839647106&focus=photo",
+  },
+  {
+    imageId: "160250679378830",
+    lat: 33.893754618605,
+    lng: 35.500823747861,
+    location: "Beirut, Lebanon",
+    url: "https://www.mapillary.com/app/?lat=33.893754618605&lng=35.500823747861&z=17&pKey=160250679378830&focus=photo",
+  },
+  {
+    imageId: "210762790856365",
+    lat: 41.0074729,
+    lng: 28.9790942,
+    location: "Istanbul, Turkey",
+    url: "https://www.mapillary.com/app/?lat=41.0074729&lng=28.9790942&z=17&pKey=210762790856365&focus=photo",
+  },
+  {
+    imageId: "1013332676209305",
+    lat: 37.983463132817,
+    lng: 23.726563553904,
+    location: "Athens, Greece",
+    url: "https://www.mapillary.com/app/?lat=37.983463132817&lng=23.726563553904&z=17&pKey=1013332676209305&focus=photo",
+  },
+  {
+    imageId: "489739962461413",
+    lat: 41.902289299972,
+    lng: 12.495587499972,
+    location: "Rome, Italy",
+    url: "https://www.mapillary.com/app/?lat=41.902289299972&lng=12.495587499972&z=17&pKey=489739962461413&focus=photo",
+  },
+  {
+    imageId: "1566516437072886",
+    lat: 38.722546509073,
+    lng: -9.1387655925224,
+    location: "Lisbon, Portugal",
+    url: "https://www.mapillary.com/app/?lat=38.722546509073&lng=-9.1387655925224&z=17&pKey=1566516437072886&focus=photo",
+  },
+  {
+    imageId: "2591299214580098",
+    lat: -36.851616702421,
+    lng: 174.7642221988,
+    location: "Auckland, New Zealand",
+    url: "https://www.mapillary.com/app/?lat=-36.851616702421&lng=174.7642221988&z=17&pKey=2591299214580098&focus=photo",
+  },
+  {
+    imageId: "1733290054476467",
+    lat: -41.2864535,
+    lng: 174.7746577,
+    location: "Wellington, New Zealand",
+    url: "https://www.mapillary.com/app/?lat=-41.2864535&lng=174.7746577&z=17&pKey=1733290054476467&focus=photo",
+  },
+  {
+    imageId: "1123278134841049",
+    lat: -6.2087064553855,
+    lng: 106.84586956507,
+    location: "Jakarta, Indonesia",
+    url: "https://www.mapillary.com/app/?lat=-6.2087064553855&lng=106.84586956507&z=17&pKey=1123278134841049&focus=photo",
+  },
+  {
+    imageId: "369158279080580",
+    lat: 10.822303408425,
+    lng: 106.62983440714,
+    location: "Ho Chi Minh City, Vietnam",
+    url: "https://www.mapillary.com/app/?lat=10.822303408425&lng=106.62983440714&z=17&pKey=369158279080580&focus=photo",
+  },
+  {
+    imageId: "1035157743823448",
+    lat: 27.717709299997,
+    lng: 85.323543399998,
+    location: "Kathmandu, Nepal",
+    url: "https://www.mapillary.com/app/?lat=27.717709299997&lng=85.323543399998&z=17&pKey=1035157743823448&focus=photo",
+  },
+  {
+    imageId: "1728191004617989",
+    lat: 28.6138405,
+    lng: 77.208068,
+    location: "New Delhi, India",
+    url: "https://www.mapillary.com/app/?lat=28.6138405&lng=77.208068&z=17&pKey=1728191004617989&focus=photo",
+  },
+  {
+    imageId: "270646555156530",
+    lat: 19.0755384,
+    lng: 72.877035800003,
+    location: "Mumbai, India",
+    url: "https://www.mapillary.com/app/?lat=19.0755384&lng=72.877035800003&z=17&pKey=270646555156530&focus=photo",
+  },
+  {
+    imageId: "1847967525367367",
+    lat: 6.927872633237,
+    lng: 79.861668768786,
+    location: "Colombo, Sri Lanka",
+    url: "https://www.mapillary.com/app/?lat=6.927872633237&lng=79.861668768786&z=17&pKey=1847967525367367&focus=photo",
+  },
+  {
+    imageId: "1196541388680672",
+    lat: 31.230470961248,
+    lng: 121.47313116688,
+    location: "Shanghai, China",
+    url: "https://www.mapillary.com/app/?lat=31.230470961248&lng=121.47313116688&z=17&pKey=1196541388680672&focus=photo",
+  },
+  {
+    imageId: "289942335955844",
+    lat: 40.187996369824,
+    lng: 44.515911145177,
+    location: "Yerevan, Armenia",
+    url: "https://www.mapillary.com/app/?lat=40.187996369824&lng=44.515911145177&z=17&pKey=289942335955844&focus=photo",
+  },
+  {
+    imageId: "1146478889169656",
+    lat: 50.076163302778,
+    lng: 14.437471108333,
+    location: "Prague, Czechia",
+    url: "https://www.mapillary.com/app/?lat=50.076163302778&lng=14.437471108333&z=17&pKey=1146478889169656&focus=photo",
+  },
+  {
+    imageId: "248340364712199",
+    lat: 64.146820600204,
+    lng: -21.943413214778,
+    location: "Reykjavik, Iceland",
+    url: "https://www.mapillary.com/app/?lat=64.146820600204&lng=-21.943413214778&z=17&pKey=248340364712199&focus=photo",
+  },
+  {
+    imageId: "370126760997120",
+    lat: 47.376088888889,
+    lng: 8.5408111111111,
+    location: "Zurich, Switzerland",
+    url: "https://www.mapillary.com/app/?lat=47.376088888889&lng=8.5408111111111&z=17&pKey=370126760997120&focus=photo",
+  },
+  {
+    imageId: "1062366994625018",
+    lat: 46.204426081846,
+    lng: 6.1433068089231,
+    location: "Geneva, Switzerland",
+    url: "https://www.mapillary.com/app/?lat=46.204426081846&lng=6.1433068089231&z=17&pKey=1062366994625018&focus=photo",
+  },
+  {
+    imageId: "289126359582167",
+    lat: 51.923468903972,
+    lng: 4.478026004,
+    location: "Rotterdam, Netherlands",
+    url: "https://www.mapillary.com/app/?lat=51.923468903972&lng=4.478026004&z=17&pKey=289126359582167&focus=photo",
+  },
+  {
+    imageId: "1619179699775763",
+    lat: 49.612267996409,
+    lng: 6.1318466119291,
+    location: "Luxembourg City, Luxembourg",
+    url: "https://www.mapillary.com/app/?lat=49.612267996409&lng=6.1318466119291&z=17&pKey=1619179699775763&focus=photo",
+  },
+  {
+    imageId: "109119478304658",
+    lat: 59.437171631579,
+    lng: 24.753068552632,
+    location: "Tallinn, Estonia",
+    url: "https://www.mapillary.com/app/?lat=59.437171631579&lng=24.753068552632&z=17&pKey=109119478304658&focus=photo",
+  },
+  {
+    imageId: "1074998136357156",
+    lat: 54.686927777778,
+    lng: 25.280652777778,
+    location: "Vilnius, Lithuania",
+    url: "https://www.mapillary.com/app/?lat=54.686927777778&lng=25.280652777778&z=17&pKey=1074998136357156&focus=photo",
+  },
+  {
+    imageId: "179020007423989",
+    lat: 41.997448,
+    lng: 21.425386,
+    location: "Skopje, North Macedonia",
+    url: "https://www.mapillary.com/app/?lat=41.997448&lng=21.425386&z=17&pKey=179020007423989&focus=photo",
+  },
+  {
+    imageId: "1113410605811731",
+    lat: 41.32664,
+    lng: 19.817750833333,
+    location: "Tirana, Albania",
+    url: "https://www.mapillary.com/app/?lat=41.32664&lng=19.817750833333&z=17&pKey=1113410605811731&focus=photo",
+  },
+  {
+    imageId: "1166080518706751",
+    lat: 35.8980906,
+    lng: 14.515254,
+    location: "Valletta, Malta",
+    url: "https://www.mapillary.com/app/?lat=35.8980906&lng=14.515254&z=17&pKey=1166080518706751&focus=photo",
+  },
+  {
+    imageId: "1058929365819993",
+    lat: 42.3605535,
+    lng: -71.0585636,
+    location: "Boston, United States",
+    url: "https://www.mapillary.com/app/?lat=42.3605535&lng=-71.0585636&z=17&pKey=1058929365819993&focus=photo",
+  },
+  {
+    imageId: "1436518873628905",
+    lat: 18.465872900001,
+    lng: -66.105317800002,
+    location: "San Juan, Puerto Rico",
+    url: "https://www.mapillary.com/app/?lat=18.465872900001&lng=-66.105317800002&z=17&pKey=1436518873628905&focus=photo",
+  },
+  {
+    imageId: "768054733896565",
+    lat: 9.9279259297242,
+    lng: -84.089721691726,
+    location: "San Jose, Costa Rica",
+    url: "https://www.mapillary.com/app/?lat=9.9279259297242&lng=-84.089721691726&z=17&pKey=768054733896565&focus=photo",
+  },
+  {
+    imageId: "475234447063724",
+    lat: -54.802027777778,
+    lng: -68.302161111111,
+    location: "Ushuaia, Argentina",
+    url: "https://www.mapillary.com/app/?lat=-54.802027777778&lng=-68.302161111111&z=17&pKey=475234447063724&focus=photo",
+  },
+  {
+    imageId: "2049301328860838",
+    lat: -13.531714096571,
+    lng: -71.967750256496,
+    location: "Cusco, Peru",
+    url: "https://www.mapillary.com/app/?lat=-13.531714096571&lng=-71.967750256496&z=17&pKey=2049301328860838&focus=photo",
+  },
+  {
+    imageId: "1070144017137567",
+    lat: 10.390878053503,
+    lng: -75.479717750577,
+    location: "Cartagena, Colombia",
+    url: "https://www.mapillary.com/app/?lat=10.390878053503&lng=-75.479717750577&z=17&pKey=1070144017137567&focus=photo",
+  },
+  {
+    imageId: "495288288569122",
+    lat: 53.480582197894,
+    lng: -2.2421716806419,
+    location: "Manchester, United Kingdom",
+    url: "https://www.mapillary.com/app/?lat=53.480582197894&lng=-2.2421716806419&z=17&pKey=495288288569122&focus=photo",
+  },
+  {
+    imageId: "174164267929342",
+    lat: 55.864866756756,
+    lng: -4.2518949909924,
+    location: "Glasgow, United Kingdom",
+    url: "https://www.mapillary.com/app/?lat=55.864866756756&lng=-4.2518949909924&z=17&pKey=174164267929342&focus=photo",
+  },
+  {
+    imageId: "1689597165751823",
+    lat: 37.38819,
+    lng: -5.9840654,
+    location: "Seville, Spain",
+    url: "https://www.mapillary.com/app/?lat=37.38819&lng=-5.9840654&z=17&pKey=1689597165751823&focus=photo",
+  },
+  {
+    imageId: "1149278995999079",
+    lat: 36.7215724,
+    lng: -4.4214386,
+    location: "Malaga, Spain",
+    url: "https://www.mapillary.com/app/?lat=36.7215724&lng=-4.4214386&z=17&pKey=1149278995999079&focus=photo",
+  },
+  {
+    imageId: "1267739414582835",
+    lat: 40.852722222222,
+    lng: 14.267540259349,
+    location: "Naples, Italy",
+    url: "https://www.mapillary.com/app/?lat=40.852722222222&lng=14.267540259349&z=17&pKey=1267739414582835&focus=photo",
+  },
+  {
+    imageId: "1041837507954729",
+    lat: 54.3513509,
+    lng: 18.6467773,
+    location: "Gdansk, Poland",
+    url: "https://www.mapillary.com/app/?lat=54.3513509&lng=18.6467773&z=17&pKey=1041837507954729&focus=photo",
+  },
+  {
+    imageId: "1490003568246861",
+    lat: 50.110929344744,
+    lng: 8.6819111035625,
+    location: "Frankfurt, Germany",
+    url: "https://www.mapillary.com/app/?lat=50.110929344744&lng=8.6819111035625&z=17&pKey=1490003568246861&focus=photo",
+  },
+  {
+    imageId: "1228262468088071",
+    lat: 38.4236776291,
+    lng: 27.143379925,
+    location: "Izmir, Turkey",
+    url: "https://www.mapillary.com/app/?lat=38.4236776291&lng=27.143379925&z=17&pKey=1228262468088071&focus=photo",
+  },
+  {
+    imageId: "1241719196792189",
+    lat: 40.63948024125,
+    lng: 22.943838235134,
+    location: "Thessaloniki, Greece",
+    url: "https://www.mapillary.com/app/?lat=40.63948024125&lng=22.943838235134&z=17&pKey=1241719196792189&focus=photo",
+  },
+  {
+    imageId: "912849376114859",
+    lat: -26.2046305463,
+    lng: 28.0475182738,
+    location: "Johannesburg, South Africa",
+    url: "https://www.mapillary.com/app/?lat=-26.2046305463&lng=28.0475182738&z=17&pKey=912849376114859&focus=photo",
+  },
+  {
+    imageId: "112297447588144",
+    lat: -29.859165748854,
+    lng: 31.022032627471,
+    location: "Durban, South Africa",
+    url: "https://www.mapillary.com/app/?lat=-29.859165748854&lng=31.022032627471&z=17&pKey=112297447588144&focus=photo",
+  },
+  {
+    imageId: "689454608987639",
+    lat: -1.9448257932394,
+    lng: 30.06111580517,
+    location: "Kigali, Rwanda",
+    url: "https://www.mapillary.com/app/?lat=-1.9448257932394&lng=30.06111580517&z=17&pKey=689454608987639&focus=photo",
+  },
+  {
+    imageId: "1666380157604423",
+    lat: -6.7919948580357,
+    lng: 39.2082603125,
+    location: "Dar es Salaam, Tanzania",
+    url: "https://www.mapillary.com/app/?lat=-6.7919948580357&lng=39.2082603125&z=17&pKey=1666380157604423&focus=photo",
+  },
+  {
+    imageId: "521385115895378",
+    lat: -15.388360771158,
+    lng: 28.323538511895,
+    location: "Lusaka, Zambia",
+    url: "https://www.mapillary.com/app/?lat=-15.388360771158&lng=28.323538511895&z=17&pKey=521385115895378&focus=photo",
+  },
+  {
+    imageId: "1166342800871098",
+    lat: -17.826172222222,
+    lng: 31.032622222222,
+    location: "Harare, Zimbabwe",
+    url: "https://www.mapillary.com/app/?lat=-17.826172222222&lng=31.032622222222&z=17&pKey=1166342800871098&focus=photo",
+  },
+  {
+    imageId: "453482575756784",
+    lat: 53.409149330063,
+    lng: -2.9917411822065,
+    location: "Liverpool, United Kingdom",
+    url: "https://www.mapillary.com/app/?lat=53.409149330063&lng=-2.9917411822065&z=17&pKey=453482575756784&focus=photo",
+  },
+  {
+    imageId: "1390167282219804",
+    lat: 51.454457,
+    lng: -2.5872123,
+    location: "Bristol, United Kingdom",
+    url: "https://www.mapillary.com/app/?lat=51.454457&lng=-2.5872123&z=17&pKey=1390167282219804&focus=photo",
+  },
+  {
+    imageId: "539280434115082",
+    lat: 43.263395840069,
+    lng: -2.9351477999934,
+    location: "Bilbao, Spain",
+    url: "https://www.mapillary.com/app/?lat=43.263395840069&lng=-2.9351477999934&z=17&pKey=539280434115082&focus=photo",
+  },
+  {
+    imageId: "1035894734671173",
+    lat: 44.4947608,
+    lng: 11.3428404,
+    location: "Bologna, Italy",
+    url: "https://www.mapillary.com/app/?lat=44.4947608&lng=11.3428404&z=17&pKey=1035894734671173&focus=photo",
+  },
+  {
+    imageId: "1102898733555196",
+    lat: 45.071179649142,
+    lng: 7.6872286491195,
+    location: "Turin, Italy",
+    url: "https://www.mapillary.com/app/?lat=45.071179649142&lng=7.6872286491195&z=17&pKey=1102898733555196&focus=photo",
+  },
+  {
+    imageId: "1078792729530706",
+    lat: 38.116436987097,
+    lng: 13.360938424047,
+    location: "Palermo, Italy",
+    url: "https://www.mapillary.com/app/?lat=38.116436987097&lng=13.360938424047&z=17&pKey=1078792729530706&focus=photo",
+  },
+  {
+    imageId: "821548242124429",
+    lat: 40.203468,
+    lng: -8.4112325,
+    location: "Coimbra, Portugal",
+    url: "https://www.mapillary.com/app/?lat=40.203468&lng=-8.4112325&z=17&pKey=821548242124429&focus=photo",
+  },
+  {
+    imageId: "3890094317712919",
+    lat: 24.713905096739,
+    lng: 46.675916905661,
+    location: "Riyadh, Saudi Arabia",
+    url: "https://www.mapillary.com/app/?lat=24.713905096739&lng=46.675916905661&z=17&pKey=3890094317712919&focus=photo",
+  },
+  {
+    imageId: "341800881225732",
+    lat: 26.223392535307,
+    lng: 50.58672845946,
+    location: "Manama, Bahrain",
+    url: "https://www.mapillary.com/app/?lat=26.223392535307&lng=50.58672845946&z=17&pKey=341800881225732&focus=photo",
+  },
+  {
+    imageId: "3591952194283711",
+    lat: 31.5202381,
+    lng: 74.3579989,
+    location: "Lahore, Pakistan",
+    url: "https://www.mapillary.com/app/?lat=31.5202381&lng=74.3579989&z=17&pKey=3591952194283711&focus=photo",
+  },
+  {
+    imageId: "158018489554423",
+    lat: 6.3162543433206,
+    lng: -10.806491011269,
+    location: "Monrovia, Liberia",
+    url: "https://www.mapillary.com/app/?lat=6.3162543433206&lng=-10.806491011269&z=17&pKey=158018489554423&focus=photo",
+  },
+  {
+    imageId: "226268122166774",
+    lat: 18.4859882109,
+    lng: -69.9321356881,
+    location: "Santo Domingo, Dominican Republic",
+    url: "https://www.mapillary.com/app/?lat=18.4859882109&lng=-69.9321356881&z=17&pKey=226268122166774&focus=photo",
+  },
 ];
 
 try {

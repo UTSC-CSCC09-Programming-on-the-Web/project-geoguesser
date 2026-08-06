@@ -14,8 +14,10 @@ CREATE TABLE IF NOT EXISTS "Locations" (
     image_id VARCHAR(50) PRIMARY KEY,
     lat DOUBLE PRECISION NOT NULL,
     lng DOUBLE PRECISION NOT NULL,
-    CONSTRAINT locations_lat_range check (lat BETWEEN -90 AND 90),
-    CONSTRAINT locations_lng_range check (lng BETWEEN -180 AND 180)
+    location VARCHAR(255) NOT NULL,
+    url VARCHAR(2048) NOT NULL,
+    CONSTRAINT locations_lat_range CHECK (lat BETWEEN -90 AND 90),
+    CONSTRAINT locations_lng_range CHECK (lng BETWEEN -180 AND 180)
 );
 
 -- Games table

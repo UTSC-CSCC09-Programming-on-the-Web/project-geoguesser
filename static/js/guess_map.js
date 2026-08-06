@@ -115,18 +115,14 @@ async function submitGuess() {
     // store round data for next round
     pendingRoundData = result.newRoundData;
 
-    // display distance from guess
+    // display actual location
     document.querySelector("#distanceResult").textContent =
       `${result.distance.toFixed(2)} km`;
 
-    document.querySelector("#yourGuess").textContent = formatCoordinate(
-      result.guessLocation,
-    );
+    document.querySelector("#actualLocation").textContent =
+      result.actualLocation.location;
 
-    document.querySelector("#actualLocation").textContent = formatCoordinate(
-      result.actualLocation,
-    );
-
+    // render the result map (draws where guesses and actual location are)
     renderResultMap(result.guessLocation, result.actualLocation);
 
     // update next-round / end-game button
@@ -140,6 +136,9 @@ async function submitGuess() {
 
     // display results section
     document.querySelector("#resultsSection").classList.remove("hidden");
+
+    // add streetview to results section
+    showReviewStreetview();
 
     // hide game container underneath
     gameLayoutInvisible(true);
@@ -159,6 +158,9 @@ async function goToNextRound() {
 
   destroyResultMap();
 
+  // move streetview from results section back to the main game area
+  restoreGameStreetview();
+
   // if there is no round data for the next round, we completed the final round
   if (!pendingRoundData) {
     endGameScreen();
@@ -170,11 +172,12 @@ async function goToNextRound() {
     resetGuessMap();
     resetHint();
 
-    // show game container
-    gameLayoutInvisible(false);
-
     try {
       await loadRound(nextRound);
+
+      // show game container after round loads
+      gameLayoutInvisible(false);
+
       // enable submit guess button
       document.querySelector("#submitGuessButton").disabled = false;
     } catch (error) {
@@ -193,7 +196,7 @@ function endGameScreen() {
       return response.json();
     })
     .then((result) => {
-      finalScoreDisplay.textContent = `${result.totalDistance.toFixed(2)} km`;
+      finalScoreDisplay.textContent = `${result.totalDistance.toFixed(0)} km`;
     });
 
   return;
@@ -212,9 +215,6 @@ async function playAgain() {
   document.querySelector("#gameOverSection").classList.add("hidden");
   destroyResultMap();
 
-  // show game container
-  gameLayoutInvisible(false);
-
   resetGuessMap();
   resetHint();
   pendingRoundData = null;
@@ -222,8 +222,12 @@ async function playAgain() {
   document.querySelector("#submitGuessButton").disabled = false;
 
   await startGame();
+
+  // show game container after game loads
+  gameLayoutInvisible(false);
 }
 
+// remove (not used anywhere anymore)
 function formatCoordinate(location) {
   if (!location) {
     return "--";
@@ -311,7 +315,11 @@ function gameLayoutInvisible(isInvisible) {
 }
 
 // #region ai-review button
+const aiReviewParentDiv = document.querySelector("#aiReviewContent");
 const aiReviewButton = document.querySelector("#aiReviewButton");
+const aiReviewStatus = document.querySelector("#aiReviewStatus");
+const aiReviewText = document.querySelector("#aiReviewText");
+
 aiReviewButton.addEventListener("click", async () => {
   if (!gameplayEnabled) {
     throw new Error("Gameplay is locked until your subscription is active.");
@@ -321,19 +329,34 @@ aiReviewButton.addEventListener("click", async () => {
     throw new Error("No streetview image loaded yet.");
   }
 
-  const response = await fetch("/streetview/ai-review", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    // sending imageId as string to ensure ID is preserved (int might overflow)
-    body: JSON.stringify({ imageId: window.imageId, mode: "review" }),
-  });
+  // modify aiReview elements
+  aiReviewParentDiv.classList.remove("hidden");
+  aiReviewButton.disabled = true;
+  aiReviewStatus.textContent = "Analyzing image ...";
+  aiReviewText.textContent = "";
 
-  const aiReview = await response.json();
+  try {
+    const response = await fetch("/streetview/ai-review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // sending imageId as string to ensure ID is preserved (int might overflow)
+      body: JSON.stringify({ imageId: window.imageId, mode: "review" }),
+    });
 
-  if (!response.ok) {
-    throw new Error(`Request to /streetview/ai-review failed.`, aiReview.error);
-  } else {
-    console.log(aiReview.text);
+    const aiReview = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        aiReview.error || `Request to /streetview/ai-review failed.`,
+      );
+    } else {
+      aiReviewStatus.textContent = "";
+      aiReviewText.textContent = aiReview.text;
+      aiReviewButton.textContent = "Review Generated";
+    }
+  } catch (error) {
+    aiReviewStatus.textContent = error.message;
+    aiReviewButton.disabled = false;
   }
 });
 // #endregion
@@ -388,4 +411,44 @@ function resetHint() {
   hintText.textContent = "Hint";
   hintButton.disabled = !gameplayEnabled;
   hintButton.textContent = "Hint";
+}
+
+// moves current streetview into the results section
+function showReviewStreetview() {
+  const streetviewContainer = document.querySelector("#streetview-container");
+  const reviewSlot = document.querySelector("#review-streetview-slot");
+
+  // modify aiReview elements
+  aiReviewParentDiv.classList.add("hidden");
+  aiReviewButton.disabled = false;
+  aiReviewButton.textContent = "AI Review";
+  aiReviewStatus.textContent = "";
+  aiReviewText.textContent = "";
+
+  if (streetviewContainer && reviewSlot) {
+    // add streetview into the review
+    reviewSlot.appendChild(streetviewContainer);
+
+    requestAnimationFrame(() => {
+      if (window.streetviewViewer?.resize) {
+        window.streetviewViewer.resize();
+      }
+    });
+  }
+}
+
+// moves streetview element back to the main game area
+function restoreGameStreetview() {
+  const streetviewContainer = document.querySelector("#streetview-container");
+  const mapContainer = document.querySelector("#mapContainer");
+
+  if (streetviewContainer && mapContainer) {
+    mapContainer.appendChild(streetviewContainer);
+
+    requestAnimationFrame(() => {
+      if (window.streetviewViewer?.resize) {
+        window.streetviewViewer.resize();
+      }
+    });
+  }
 }

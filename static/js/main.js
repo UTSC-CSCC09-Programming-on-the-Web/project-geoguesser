@@ -1,7 +1,6 @@
 "use strict";
 
-// object that will hold the streetview map
-let streetviewViewer;
+// object that will hold the streetview map held in window.streetview
 
 document.addEventListener("DOMContentLoaded", startGame);
 
@@ -39,8 +38,11 @@ async function loadStreetview(imageId) {
   const streetviewContainer = document.querySelector("#streetview-container");
 
   try {
+    // display a "loading" screen on streetviewContainer
+    streetviewContainer.classList.add("loading");
+
     // set up streetview viewer for seeing streetviews (if not already set up)
-    if (!streetviewViewer) {
+    if (!window.streetviewViewer) {
       // get MAPILLARY_ACCESS_TOKEN
       const tokenResponse = await fetch("/streetview/access-token");
       const tokenResult = await tokenResponse.json();
@@ -52,16 +54,22 @@ async function loadStreetview(imageId) {
       }
 
       // viewer created to be displayed in streetviewContainer
-      streetviewViewer = new mapillary.Viewer({
+      window.streetviewViewer = new mapillary.Viewer({
         accessToken: tokenResult.accessToken,
         container: streetviewContainer,
       });
     }
 
     // viewer displays image at location
-    await streetviewViewer.moveTo(imageId);
+    await window.streetviewViewer.moveTo(imageId);
+
+    // remove "loading" state from streetviewContainer once new streetview ready
+    streetviewContainer.classList.remove("loading");
   } catch (error) {
     console.error("Unable to load Mapillary image: ", error);
+
+    // remove "loading" state from streetviewContainer on failure to load
+    streetviewContainer.classList.remove("loading");
     streetviewContainer.textContent = "Unable to load streetview image";
   }
 }

@@ -1,6 +1,9 @@
 import { Sequelize } from "sequelize";
+import dotenv from "dotenv";
 
 // #region get environment variables from .env file
+dotenv.config();
+
 const { DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT } = process.env;
 
 if (!DB_NAME || !DB_USER || !DB_PASSWORD) {

@@ -30,6 +30,10 @@ export const Locations = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
     },
+    url: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
   },
   // table name in postgres
   { tableName: "Locations", timestamps: false },

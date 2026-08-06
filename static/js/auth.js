@@ -2,7 +2,6 @@ const authStatus = document.querySelector("#authStatus");
 const loginButton = document.querySelector("#loginButton");
 const subscribeButton = document.querySelector("#subscribeButton");
 const logoutButton = document.querySelector("#logoutButton");
-const authAiReviewButton = document.querySelector("#aiReviewButton");
 const authHintButton = document.querySelector("#hintButton");
 const gameLayout = document.querySelector(".game-layout");
 const accessGate = document.querySelector("#accessGate");
@@ -46,7 +45,6 @@ const setAuthUi = (user) => {
     loginButton.classList.remove("hidden");
     subscribeButton.classList.add("hidden");
     logoutButton.classList.add("hidden");
-    authAiReviewButton.disabled = true;
     authHintButton.disabled = true;
     updateGateUi(null);
     updateAccessState(null);
@@ -61,7 +59,6 @@ const setAuthUi = (user) => {
   loginButton.classList.add("hidden");
   logoutButton.classList.remove("hidden");
   subscribeButton.classList.toggle("hidden", isSubscribed);
-  authAiReviewButton.disabled = !isSubscribed;
   authHintButton.disabled = !isSubscribed;
   updateGateUi(user);
   updateAccessState(user);

@@ -97,7 +97,7 @@ streetviewRouter.post("/ai-review", async (req, res) => {
       "You are a GeoGuesser coach. Analyze this image and give the player a useful location hint.Give exactly 1 to 3 concise sentences about where this location might be. Use visible clues such as signs, language, road markings, architecture, vegetation, utility poles, vehicles, license plates, and road quality. Indicate a region, or broad climate/landscape clue. Do not provide an exact city or country. Do not reveal GPS coordinates or hidden metadata. Be honest about uncertainty and do not state an unsupported exact location.";
 
     const aiInstructionForReview =
-      "You are a GeoGuesser coach. Analyze this image and give a concise review of how the player could have guessed the geographic location of the image. Use all visible indicators from the image. This includes signs, businesses, road markings, architecture, vegetation, utility poles, vehicles, license plates, language, people, and road quality. Do not use GPS or hidden image metadata.";
+      "You are a GeoGuesser coach. Analyze this image and give a concise review (maximum of 4 sentences) of how the player could have guessed the geographic location of the image. Use all visible indicators from the image. This includes signs, businesses, road markings, architecture, vegetation, utility poles, vehicles, license plates, language, people, and road quality. Do not use GPS or hidden image metadata. Review should be returned without asterisks.";
 
     // #region Gemini API call
     const rawGeminiResponse = await fetch(
