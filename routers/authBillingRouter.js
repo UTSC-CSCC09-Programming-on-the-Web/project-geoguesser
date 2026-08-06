@@ -145,64 +145,6 @@ const findOrCreateUser = async (profile) => {
 
     return user;
   }
-
-  // // REMOVE: old code
-  // const username =
-  //   profile.username ||
-  //   generateUniqueUsername(profile.displayName, email, profile.id);
-
-  // if (!email) {
-  //   throw new Error("Google profile did not include an email address");
-  // }
-
-  // const existingUser = await Users.findOne({
-  //   where: {
-  //     authProvider: "google",
-  //     providerUserId: providerUserId,
-  //   },
-  // });
-
-  // if (existingUser) {
-  //   const existingSubscription = await Subscriptions.findOne({
-  //     where: { userId: existingUser.userId },
-  //   });
-
-  //   return {
-  //     id: existingUser.userId,
-  //     email: existingUser.email,
-  //     name: existingUser.username,
-  //     status: existingSubscription?.status || "pending_payment",
-  //   };
-  // }
-
-  // const createdUser = await sequelize.transaction(async (transaction) => {
-  //   const user = await Users.create(
-  //     {
-  //       email: email,
-  //       username: username,
-  //       authProvider: "google",
-  //       providerUserId: providerUserId,
-  //     },
-  //     { transaction },
-  //   );
-
-  //   await Subscriptions.create(
-  //     {
-  //       userId: user.userId,
-  //       status: "pending_payment",
-  //     },
-  //     { transaction },
-  //   );
-
-  //   return user;
-  // });
-
-  // return {
-  //   id: createdUser.userId,
-  //   email: createdUser.email,
-  //   name: createdUser.username,
-  //   status: "pending_payment",
-  // };
 };
 
 if (oauthEnabled) {
@@ -343,38 +285,6 @@ router.get("/api/me", authenticateToken, async (req, res) => {
     console.error(error);
     return res.status(500).json({ error: "Internal server error" });
   }
-
-  // // remove: old code
-  // const currentSubscription = await Subscriptions.findOne({
-  //   where: { userId: req.user.userId },
-  // });
-
-  // const currentStatus = currentSubscription?.status || "pending_payment";
-  // if (currentStatus !== req.user.status) {
-  //   const token = jwt.sign(
-  //     {
-  //       id: req.user.userId,
-  //     },
-  //     JWT_SECRET,
-  //     { expiresIn: "1h" },
-  //   );
-
-  //   res.cookie("token", token, {
-  //     httpOnly: true,
-  //     secure: process.env.NODE_ENV === "production",
-  //     sameSite: "lax",
-  //     maxAge: 3600000,
-  //   });
-  // }
-
-  // return res.json({
-  //   user: {
-  //     id: req.user.userId,
-  //     email: req.user.email,
-  //     name: req.user.name,
-  //     status: currentStatus,
-  //   },
-  // });
 });
 
 router.post(

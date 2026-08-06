@@ -504,20 +504,6 @@ body {
   font-weight: 500;
 }
 
-/* remove: this class non-existent in index.html */
-/* .ai-review-section {
-  padding: 1.5rem;
-  border-top: 1px solid var(--border-color);
-} */
-
-/* remove: this class non-existence in index.html */
-/* .ai-review-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 1.5rem;
-  align-items: start;
-} */
-
 .ai-review-content {
   margin-top: 1rem;
   min-width: 0;

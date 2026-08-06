@@ -1,5 +1,7 @@
 # node_modules
 node_modules
+
+# environment variables
 .env
 
 # gemini api key
@@ -7,3 +9,9 @@ gemini_api_key
 
 # VM SSH key
 LightsailDefaultKey-ca-central-1.pem
+
+# did not use migrations for sql
+schema.sql
+
+# holds the locations I planned to seed my game with
+seedLocations.generated.js

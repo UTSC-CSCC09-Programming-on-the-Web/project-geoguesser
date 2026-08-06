@@ -23,6 +23,7 @@ let resultLine;
 let gameplayEnabled = false;
 // #endregion
 
+// #region event-listeners
 window.addEventListener("geoguesser-access-changed", (event) => {
   gameplayEnabled = event.detail.canPlay;
 });
@@ -52,6 +53,101 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelector("#playAgainBtn").addEventListener("click", playAgain);
 });
 
+// #region ai-review button
+const aiReviewParentDiv = document.querySelector("#aiReviewContent");
+const aiReviewButton = document.querySelector("#aiReviewButton");
+const aiReviewStatus = document.querySelector("#aiReviewStatus");
+const aiReviewText = document.querySelector("#aiReviewText");
+
+aiReviewButton.addEventListener("click", async () => {
+  if (!gameplayEnabled) {
+    throw new Error("Gameplay is locked until your subscription is active.");
+  }
+
+  if (!window.imageId) {
+    throw new Error("No streetview image loaded yet.");
+  }
+
+  // modify aiReview elements
+  aiReviewParentDiv.classList.remove("hidden");
+  aiReviewButton.disabled = true;
+  aiReviewStatus.textContent = "Analyzing image ...";
+  aiReviewText.textContent = "";
+
+  try {
+    const response = await fetch("/streetview/ai-review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // sending imageId as string to ensure ID is preserved (int might overflow)
+      body: JSON.stringify({ imageId: window.imageId, mode: "review" }),
+    });
+
+    const aiReview = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        aiReview.error || `Request to /streetview/ai-review failed.`,
+      );
+    } else {
+      aiReviewStatus.textContent = "";
+      aiReviewText.textContent = aiReview.text;
+      aiReviewButton.textContent = "Review Generated";
+    }
+  } catch (error) {
+    aiReviewStatus.textContent = error.message;
+    aiReviewButton.disabled = false;
+  }
+});
+// #endregion
+
+// #region ai-hint button
+const hintButton = document.querySelector("#hintButton");
+const hintCard = document.querySelector("#hintCard");
+const hintText = document.querySelector("#hintText");
+hintButton.addEventListener("click", async () => {
+  if (!gameplayEnabled) {
+    alert("Gameplay is locked until your subscription is active.");
+    return;
+  }
+
+  if (!window.imageId) {
+    alert("No streetview image loaded yet");
+    return;
+  }
+
+  hintButton.disabled = true;
+  hintButton.textContent = "Thinking ...";
+  hintCard.classList.remove("hidden");
+  hintText.textContent = "Analyzing the visible clues ...";
+
+  try {
+    const response = await fetch("/streetview/ai-review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ imageId: window.imageId, mode: "hint" }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Unable to generate a hint");
+    }
+
+    hintText.textContent = result.text;
+    hintButton.textContent = "Hint Used";
+  } catch (error) {
+    console.log(error);
+    hintCard.classList.add("hidden");
+    hintText.textContent = "";
+    hintButton.disabled = false;
+    hintButton.textContent = "Hint";
+  }
+});
+// #endregion
+
+// #endregion
+
+// #region helper functions
 function normalizeLongitude(lng) {
   const normalized = ((((lng + 180) % 360) + 360) % 360) - 180;
   return normalized === -180 ? 180 : normalized;
@@ -227,15 +323,7 @@ async function playAgain() {
   gameLayoutInvisible(false);
 }
 
-// remove (not used anywhere anymore)
-function formatCoordinate(location) {
-  if (!location) {
-    return "--";
-  }
-
-  return `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`;
-}
-
+// draws the result map with markers for guess and actual location
 function renderResultMap(guessLocation, actualLocation) {
   const resultMapContainer = document.querySelector("#resultMap");
 
@@ -306,6 +394,7 @@ function destroyResultMap() {
   resultLine = null;
 }
 
+// hides / shows main game layout (streetview and guessmap)
 function gameLayoutInvisible(isInvisible) {
   const gameContainer = document.querySelector(".game-container");
 
@@ -314,98 +403,7 @@ function gameLayoutInvisible(isInvisible) {
   }
 }
 
-// #region ai-review button
-const aiReviewParentDiv = document.querySelector("#aiReviewContent");
-const aiReviewButton = document.querySelector("#aiReviewButton");
-const aiReviewStatus = document.querySelector("#aiReviewStatus");
-const aiReviewText = document.querySelector("#aiReviewText");
-
-aiReviewButton.addEventListener("click", async () => {
-  if (!gameplayEnabled) {
-    throw new Error("Gameplay is locked until your subscription is active.");
-  }
-
-  if (!window.imageId) {
-    throw new Error("No streetview image loaded yet.");
-  }
-
-  // modify aiReview elements
-  aiReviewParentDiv.classList.remove("hidden");
-  aiReviewButton.disabled = true;
-  aiReviewStatus.textContent = "Analyzing image ...";
-  aiReviewText.textContent = "";
-
-  try {
-    const response = await fetch("/streetview/ai-review", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // sending imageId as string to ensure ID is preserved (int might overflow)
-      body: JSON.stringify({ imageId: window.imageId, mode: "review" }),
-    });
-
-    const aiReview = await response.json();
-
-    if (!response.ok) {
-      throw new Error(
-        aiReview.error || `Request to /streetview/ai-review failed.`,
-      );
-    } else {
-      aiReviewStatus.textContent = "";
-      aiReviewText.textContent = aiReview.text;
-      aiReviewButton.textContent = "Review Generated";
-    }
-  } catch (error) {
-    aiReviewStatus.textContent = error.message;
-    aiReviewButton.disabled = false;
-  }
-});
-// #endregion
-
-// #region ai-hint button
-const hintButton = document.querySelector("#hintButton");
-const hintCard = document.querySelector("#hintCard");
-const hintText = document.querySelector("#hintText");
-hintButton.addEventListener("click", async () => {
-  if (!gameplayEnabled) {
-    alert("Gameplay is locked until your subscription is active.");
-    return;
-  }
-
-  if (!window.imageId) {
-    alert("No streetview image loaded yet");
-    return;
-  }
-
-  hintButton.disabled = true;
-  hintButton.textContent = "Thinking ...";
-  hintCard.classList.remove("hidden");
-  hintText.textContent = "Analyzing the visible clues ...";
-
-  try {
-    const response = await fetch("/streetview/ai-review", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ imageId: window.imageId, mode: "hint" }),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      throw new Error(result.error || "Unable to generate a hint");
-    }
-
-    hintText.textContent = result.text;
-    hintButton.textContent = "Hint Used";
-  } catch (error) {
-    console.log(error);
-    hintCard.classList.add("hidden");
-    hintText.textContent = "";
-    hintButton.disabled = false;
-    hintButton.textContent = "Hint";
-  }
-});
-// #endregion
-
+// reset UI of hint button
 function resetHint() {
   hintCard.classList.add("hidden");
   hintText.textContent = "Hint";
@@ -452,3 +450,4 @@ function restoreGameStreetview() {
     });
   }
 }
+// #endregion

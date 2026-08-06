@@ -1,7 +1,5 @@
 "use strict";
 
-// object that will hold the streetview map held in window.streetview
-
 document.addEventListener("DOMContentLoaded", startGame);
 
 async function startGame() {
