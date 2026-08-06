@@ -1,0 +1,177 @@
+# Can you help me implement a feature? I want to give the use…
+
+> Can you help me implement a feature?
+>
+> I want to give the user a 1 to 2-sentence hint and display it on the UI nicely. The hint can be generated from the help of the /streetview/ai-review endpoint. We can modify the api call to the AI to make it a hint, instead of a whole review.
+>
+> Please leave the code here, so I can try and implement it myself
+
+<details><summary>1 previous message</summary>
+
+> I’ll trace the existing AI-review flow and the UI rendering path, then give you targeted code changes you can apply yourself.
+
+</details>
+
+The existing `/streetview/ai-review` endpoint already has almost everything needed. You can convert its response from `review` to `hint`, then render it in a small UI card.
+
+### 1. Update the Gemini prompt
+
+In [`routers/streetviewRouter.js`](./routers/streetviewRouter.js), replace the current prompt with:
+
+```js
+text: `You are a GeoGuesser hint generator.
+
+Analyze this image and provide one useful hint that helps the player identify the geographic location without directly revealing the answer.
+
+Your response must:
+- Be only 1 or 2 sentences
+- Mention the strongest visible geographic clues
+- Avoid naming the exact city or country
+- Avoid discussing hidden metadata, GPS, or image IDs
+- Be clear and helpful for a beginner
+
+Consider signs, language, road markings, architecture, vegetation, utility poles, vehicles, license plates, and road quality.`,
+```
+
+Then rename the extracted value and response:
+
+```js
+// Extract hint from Gemini's response
+const hint = geminiResponse.candidates?.[0]?.content?.parts
+  ?.map((part) => part.text || "")
+  .join("")
+  .trim();
+
+if (!hint) {
+  return res.status(502).json({
+    error: "Gemini returned an empty hint",
+  });
+}
+
+return res.json({ hint });
+```
+
+You can also update the error messages in the `catch` block:
+
+```js
+console.log("AI hint error: ", error);
+
+return res.status(500).json({
+  error: "Unable to generate AI hint",
+});
+```
+
+### 2. Add a hint display area
+
+In [`static/index.html`](./static/index.html), add this below the action buttons:
+
+```html
+<div id="hintMessage" class="hint-message hidden" role="status">
+  <div class="hint-title">💡 Hint</div>
+  <p id="hintText"></p>
+</div>
+```
+
+You may also want to rename the button:
+
+```html
+<button class="btn btn-secondary" id="hintButton">Get Hint</button>
+```
+
+### 3. Add styling
+
+In [`static/css/style.css`](./static/css/style.css), add:
+
+```css
+.hint-message {
+  margin-top: 1rem;
+  padding: 1rem 1.25rem;
+  border-left: 4px solid #f4b942;
+  border-radius: 0.75rem;
+  background: #fff8df;
+  color: #4a3b12;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 8%);
+}
+
+.hint-title {
+  margin-bottom: 0.35rem;
+  font-weight: 700;
+}
+
+.hint-message p {
+  margin: 0;
+  line-height: 1.5;
+}
+```
+
+### 4. Call the endpoint from the Hint button
+
+In [`static/js/guess_map.js`](\wsl.localhost\Ubuntu\home\spambuddy\cscc09\project-geoguesser\static\js\guess_map.js), add:
+
+```js
+const hintButton = document.querySelector("#hintButton");
+const hintMessage = document.querySelector("#hintMessage");
+const hintText = document.querySelector("#hintText");
+
+hintButton.addEventListener("click", async () => {
+  if (!gameplayEnabled) {
+    return;
+  }
+
+  const imageId = window.currentStreetviewImageId;
+
+  if (!imageId) {
+    hintText.textContent = "No streetview image is loaded yet.";
+    hintMessage.classList.remove("hidden");
+    return;
+  }
+
+  hintButton.disabled = true;
+  hintButton.textContent = "Generating hint...";
+  hintText.textContent = "";
+  hintMessage.classList.remove("hidden");
+
+  try {
+    const response = await fetch("/streetview/ai-review", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ imageId: String(imageId) }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Unable to generate hint.");
+    }
+
+    hintText.textContent = data.hint;
+  } catch (error) {
+    hintText.textContent = error.message;
+  } finally {
+    hintButton.disabled = false;
+    hintButton.textContent = "Get Hint";
+  }
+});
+```
+
+One important detail: your current code sends `window.imageId`, but [`static/js/streetview.js`](./static/js/streetview.js) appears to set:
+
+```js
+window.currentStreetviewImageId = String(randomLocationImageId);
+```
+
+So the hint code should use:
+
+```js
+window.currentStreetviewImageId;
+```
+
+rather than:
+
+```js
+window.imageId;
+```
+
+You can keep the endpoint named `/ai-review` for now, or rename it to `/ai-hint` later for clarity.

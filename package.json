@@ -1,0 +1,20 @@
+{
+  "type": "module",
+  "scripts": {
+    "start": "node bootstrap.js",
+    "dev": "node --watch bootstrap.js",
+    "seed_locations": "node database/seedLocations.js"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "node": "^26.5.0",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "pg": "^8.22.0",
+    "sequelize": "^6.37.8",
+    "stripe": "^22.3.2"
+  }
+}

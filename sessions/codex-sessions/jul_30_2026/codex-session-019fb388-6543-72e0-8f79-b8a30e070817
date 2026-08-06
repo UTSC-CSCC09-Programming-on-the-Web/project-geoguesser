@@ -1,0 +1,864 @@
+# I am having trouble running my game. When I do node app.js…
+
+> I am having trouble running my game. When I do `node app.js` the server starts. But then when I visit localhost:3000, I'm getting the following errors.
+>
+> XHR
+> POST
+> [http://localhost:3000/games/start](http://localhost:3000/games/start)
+> [HTTP/1.1 404 Not Found 56ms]
+>
+> SyntaxError: JSON.parse: unexpected character at line 1 column 1 of the JSON data
+
+<details><summary>2 previous messages</summary>
+
+> I’ll trace the browser request from the frontend through the Express route and verify the route path and response format.
+>
+> The cause is clear: the frontend posts to `/games/start`, and `gameRouter` defines that endpoint, but `app.js` imports `gameRouter` without mounting it. Express therefore returns its default HTML 404 page; the frontend then tries to parse that HTML as JSON, causing the second error.
+</details>
+
+The issue is that `gameRouter` is imported but never mounted in `app.js`.
+
+Add this after the other route registrations:
+
+```js
+app.use("/games", authenticateToken, requireActiveSubscription, gameRouter);
+```
+
+Your existing route:
+
+```js
+gameRouter.post("/start", ...)
+```
+
+then becomes available at:
+
+```text
+POST /games/start
+```
+
+The JSON error happens because Express returns an HTML 404 page, and `main.js` tries to parse that HTML with `response.json()`.
+
+Also ensure the user is authenticated and subscribed, since the route uses those middleware functions.
+
+> Ok, I've done that change. I'm trying to understand now how I can load the user logged in onto the request.  ie. have a middleware that does req.user = userLoggedIn.  I'm not sure if this is done already in my code or not.  Can you write the code here so I can make the modifications myself
+
+You already have this middleware in `routers/authBillingRouter.js`:
+
+```js
+export const authenticateToken = (req, res, next) => {
+  const token = req.cookies.token;
+
+  if (!token) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  jwt.verify(token, JWT_SECRET, (error, user) => {
+    if (error) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    req.user = user;
+    next();
+  });
+};
+```
+
+The important part is:
+
+```js
+req.user = user;
+```
+
+Your route should use the middleware before the handler:
+
+```js
+app.use("/games", authenticateToken, gameRouter);
+```
+
+Or for one endpoint:
+
+```js
+gameRouter.post(
+  "/start",
+  authenticateToken,
+  async (req, res) => {
+    console.log(req.user);
+
+    const userId = req.user.id;
+
+    // game logic...
+  }
+);
+```
+
+When creating the JWT after login, include the user ID:
+
+```js
+const token = jwt.sign(
+  {
+    id: user.userId,
+    email: user.email,
+    name: user.displayName,
+  },
+  JWT_SECRET,
+  { expiresIn: "1h" }
+);
+```
+
+Then access it anywhere after `authenticateToken` runs:
+
+```js
+const userId = req.user.id;
+```
+
+In your current `gameRouter.js`, you likely have:
+
+```js
+const userId = req.user.userId;
+```
+
+Change that to:
+
+```js
+const userId = req.user.id;
+```
+
+Your browser must also send the cookie. For same-origin requests, this happens automatically. For cross-origin requests, use:
+
+```js
+fetch("/games/start", {
+  method: "POST",
+  credentials: "include",
+  headers: {
+    "Content-Type": "application/json",
+  },
+});
+```
+
+The request flow is:
+
+```text
+Login
+  → JWT stored in token cookie
+  → authenticateToken verifies cookie
+  → req.user populated
+  → game route reads req.user.id
+```
+
+> export const authenticateToken = (req, res, next) => {
+>   const token = req.cookies.token;
+>
+>   if (!token) {
+>     return res.status(401).json({ message: "Unauthorized" });
+>   }
+>
+>   jwt.verify(token, JWT_SECRET, (error, user) => {
+>     if (error) {
+>       return res.status(403).json({ message: "Forbidden" });
+>     }
+>
+>     req.user = user;
+>     next();
+>   });
+> };
+>
+> In this code, is the "user" object the same as a user object from the Users table?  I would prefer if I fetched the actual user from the Users table and attached that to the request via req.user.  Would this change anything with the authentication process?
+>
+> Also, why does that user object use user.id? I would prefer we keep it uniform across the code base, so ideally I would like to use user.userId.
+>
+> Can you leave the code here so I can modify the codebase myself?
+
+No. In this middleware, `user` is the decoded JWT payload, not the record from your `Users` table.
+
+You can fetch the real database user after verifying the token and attach that record to `req.user`:
+
+```js
+import jwt from "jsonwebtoken";
+import { Users } from "../database/models/users.js";
+
+export const authenticateToken = async (req, res, next) => {
+  const token = req.cookies.token;
+
+  if (!token) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+
+    const user = await Users.findByPk(payload.userId);
+
+    if (!user) {
+      return res.status(401).json({ message: "User no longer exists" });
+    }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    return res.status(403).json({ message: "Invalid or expired token" });
+  }
+};
+```
+
+Then create the JWT using `userId` instead of `id`:
+
+```js
+const token = jwt.sign(
+  {
+    userId: user.userId,
+  },
+  JWT_SECRET,
+  { expiresIn: "1h" }
+);
+```
+
+Your route can then use the actual Sequelize user object consistently:
+
+```js
+gameRouter.post("/start", authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
+
+  console.log(req.user); // Actual Users table record
+
+  // Game logic...
+});
+```
+
+If your login code currently has a user object such as:
+
+```js
+{
+  id: user.userId,
+  email: user.email,
+  name: user.displayName
+}
+```
+
+change it to:
+
+```js
+{
+  userId: user.userId,
+  email: user.email,
+  name: user.displayName
+}
+```
+
+This does not weaken authentication. The JWT still proves that the request possesses a valid signed token. Fetching the user afterward additionally confirms that the user still exists and lets you use the latest database values.
+
+> I noticed in my code base, in authBillingRouter.js, everytime I call jwt.sign, I'm doing the following.
+>
+> const token = jwt.sign(
+>         {
+>           id: req.user.id,
+>           email: req.user.email,
+>           name: req.user.name,
+>           status: currentStatus,
+>         },
+>         JWT_SECRET,
+>         { expiresIn: "1h" },
+>       );
+>
+> Can you take a look at the rest of the code base and see if I need to keep email, name, and status attached with the user object?  If so, does this mean I have to modify the Users model to have these as additional columns in the table?
+>
+> Are there two different user objects in play in the code?  I would ideally like everything to be based off of the Users table objects, so it makes life easier.
+
+<details><summary>1 previous message</summary>
+
+> I’ll trace every JWT creation and every place that reads `req.user`, then distinguish JWT claims from the actual `Users` table record.
+</details>
+
+I inspected the codebase. You now have two different representations:
+
+1. The Google/login user object returned by `findOrCreateUser()`
+2. The actual Sequelize `Users` record attached by `authenticateToken`
+
+Your current `authenticateToken` already fetches the database record:
+
+```js
+const payload = jwt.verify(token, JWT_SECRET);
+const user = await Users.findByPk(payload.userId);
+req.user = user;
+```
+
+Therefore, `req.user` should be treated as the `Users` table object.
+
+You do not need to add columns for `email` or `name`. Your `Users` model already has `email` and `username`. Subscription `status` belongs in the `Subscriptions` table, not `Users`.
+
+Use this cleaned-up middleware and remove the second, unreachable `jwt.verify` block currently below it:
+
+```js
+export const authenticateToken = async (req, res, next) => {
+  const token = req.cookies.token;
+
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+
+    const user = await Users.findByPk(payload.userId);
+
+    if (!user) {
+      return res.status(401).json({ error: "User no longer exists" });
+    }
+
+    req.user = user;
+    return next();
+  } catch (error) {
+    console.error(error);
+    return res.status(403).json({ error: "Invalid or expired token" });
+  }
+};
+```
+
+Create tokens with only the stable identifier:
+
+```js
+const token = jwt.sign(
+  {
+    userId: req.user.userId,
+  },
+  JWT_SECRET,
+  { expiresIn: "1h" }
+);
+```
+
+Then consistently use:
+
+```js
+req.user.userId
+req.user.email
+req.user.username
+```
+
+For example, update these patterns:
+
+```js
+// Current
+where: { userId: req.user.id }
+
+// Replace with
+where: { userId: req.user.userId }
+```
+
+```js
+// Current
+customer_email: req.user.email
+
+// Keep as-is
+customer_email: req.user.email
+```
+
+For `/api/me`, fetch subscription status separately and return a frontend-friendly response:
+
+```js
+router.get("/api/me", authenticateToken, async (req, res) => {
+  try {
+    const subscription = await Subscriptions.findOne({
+      where: { userId: req.user.userId },
+    });
+
+    return res.json({
+      user: {
+        userId: req.user.userId,
+        email: req.user.email,
+        username: req.user.username,
+        status: subscription?.status || "pending_payment",
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+```
+
+The frontend must then use `username` instead of `name`:
+
+```js
+authStatus.textContent = isSubscribed
+  ? `Logged in as ${user.username} (subscription active)`
+  : `Logged in as ${user.username} (subscription required)`;
+```
+
+So the recommended structure is:
+
+```text
+JWT:                 { userId }
+req.user:            actual Users table record
+subscription status: Subscriptions table record
+frontend response:   combined user + subscription status
+```
+
+> So for JWT, I only have to sign with userId, that's enough?
+>
+> Where does the user get her username from?
+
+Yes. The JWT only needs the stable identifier:
+
+```js
+const token = jwt.sign(
+  { userId: user.userId },
+  JWT_SECRET,
+  { expiresIn: "1h" }
+);
+```
+
+On later requests, the middleware uses that `userId` to retrieve the complete user from the database:
+
+```js
+const payload = jwt.verify(token, JWT_SECRET);
+const user = await Users.findByPk(payload.userId);
+
+req.user = user;
+```
+
+The username comes from the `Users` table:
+
+```js
+req.user.username
+```
+
+For example:
+
+```js
+console.log(req.user.userId);
+console.log(req.user.username);
+console.log(req.user.email);
+```
+
+The JWT does not need to contain the username or email. This keeps user information current if it changes in the database.
+
+> Ok, so I notice in a lot of places in my code, I am still using `user.status` or `.status` when it's not a subscription object.  How would I refactor the code so I'm using subscription status instead?
+>
+> Can you provide code changes here so I can manually do them?
+
+`status` should come from the `Subscriptions` table, not from `req.user`.
+
+Use this pattern whenever you need subscription status:
+
+```js
+const subscription = await Subscriptions.findOne({
+  where: { userId: req.user.userId },
+});
+
+const subscriptionStatus = subscription?.status || "pending_payment";
+```
+
+Then check:
+
+```js
+if (subscriptionStatus !== "active") {
+  return res.status(403).json({
+    error: "Subscription required.",
+  });
+}
+```
+
+Your `requireActiveSubscription` middleware should become:
+
+```js
+export const requireActiveSubscription = async (req, res, next) => {
+  try {
+    const subscription = await Subscriptions.findOne({
+      where: { userId: req.user.userId },
+    });
+
+    if (subscription?.status !== "active") {
+      return res.status(403).json({
+        error: "Subscription expired. Please renew.",
+      });
+    }
+
+    req.subscription = subscription;
+    return next();
+  } catch (error) {
+    return res.status(500).json({
+      error: "Database error",
+    });
+  }
+};
+```
+
+Attaching it to the request is useful:
+
+```js
+req.user;         // Users table record
+req.subscription; // Subscriptions table record
+```
+
+Then later routes can use:
+
+```js
+const userId = req.user.userId;
+const subscriptionStatus = req.subscription.status;
+```
+
+For `/api/me`, replace the current logic with:
+
+```js
+router.get("/api/me", authenticateToken, async (req, res) => {
+  try {
+    const subscription = await Subscriptions.findOne({
+      where: { userId: req.user.userId },
+    });
+
+    return res.json({
+      user: {
+        userId: req.user.userId,
+        email: req.user.email,
+        username: req.user.username,
+
+        // This is subscription status, not Users.status
+        subscriptionStatus: subscription?.status || "pending_payment",
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: "Internal server error",
+    });
+  }
+});
+```
+
+Remove code like this from the backend:
+
+```js
+req.user.status
+req.user.id
+```
+
+Replace it with:
+
+```js
+req.subscription.status
+req.user.userId
+```
+
+For example, change:
+
+```js
+if (currentStatus !== req.user.status) {
+  const token = jwt.sign(
+    {
+      id: req.user.id,
+      email: req.user.email,
+      name: req.user.name,
+      status: currentStatus,
+    },
+    JWT_SECRET,
+    { expiresIn: "1h" }
+  );
+}
+```
+
+to simply:
+
+```js
+// No token refresh is needed just because subscription status changed.
+// Subscription status is read from the database when needed.
+```
+
+Also update checkout references:
+
+```js
+// Before
+client_reference_id: String(req.user.id),
+customer_email: req.user.email,
+metadata: {
+  user_id: String(req.user.id),
+}
+```
+
+```js
+// After
+client_reference_id: String(req.user.userId),
+customer_email: req.user.email,
+metadata: {
+  user_id: String(req.user.userId),
+}
+```
+
+The frontend can still receive a status field, but rename it for clarity:
+
+```js
+const canPlay = user.subscriptionStatus === "active";
+```
+
+Update frontend references:
+
+```js
+user.status === "active"
+```
+
+to:
+
+```js
+user.subscriptionStatus === "active"
+```
+
+And update the displayed username:
+
+```js
+user.name
+```
+
+to:
+
+```js
+user.username
+```
+
+The resulting structure is:
+
+```js
+req.user.userId
+req.user.username
+req.user.email
+
+req.subscription.status
+req.subscription.userId
+```
+
+Your JWT should contain only:
+
+```js
+{
+  userId: 123
+}
+```
+
+> Ok can you take a look over my whole codebase and tell me if you see any errors / issues I will run into, and fixes for those?
+>
+> Also, I'm not sure how a person who logs in to play will be assigned a username.
+>
+> Are we creating a Users object in the database table when someone logs in / signs up?
+
+<details><summary>1 previous message</summary>
+
+> I’ll audit the authentication, user creation, subscription, and game-request flow, then identify concrete inconsistencies and explain exactly when the `Users` row and username are created.
+</details>
+
+Yes, your code creates a `Users` row when a person logs in with Google for the first time.
+
+The flow is:
+
+```text
+User visits /auth/google
+→ Google authenticates the user
+→ /auth/google/callback runs
+→ findOrCreateUser(profile) runs
+→ Users.findOne(...)
+→ Users.create(...) if no existing user exists
+→ subscription row is created
+→ JWT is issued
+```
+
+However, I found several issues you should fix.
+
+### 1. Google uses `profile.id`, not `profile.userId`
+
+Your code currently has:
+
+```js
+const providerUserId = profile.userId;
+```
+
+Change it to:
+
+```js
+const providerUserId = profile.id;
+```
+
+Otherwise, `providerUserId` will be undefined and user lookup/creation may fail.
+
+### 2. Your username fallback is not unique
+
+You currently have:
+
+```js
+const username = profile.username || "GeoGuesser Player";
+```
+
+Since `username` is unique in your database, the second user who does not have a Google username will cause a duplicate-key error.
+
+A better temporary approach is:
+
+```js
+const email = profile.emails?.[0]?.value;
+
+const username =
+  profile.displayName ||
+  email?.split("@")[0] ||
+  `player_${profile.id}`;
+```
+
+But display names can also collide. The safest approach is to generate a unique username:
+
+```js
+const baseUsername =
+  profile.displayName ||
+  email?.split("@")[0] ||
+  "player";
+
+const username = `${baseUsername}_${profile.id}`
+  .toLowerCase()
+  .replace(/[^a-z0-9_]/g, "_")
+  .slice(0, 255);
+```
+
+You could later let users change this username through a profile-settings route.
+
+### 3. Update `findOrCreateUser`
+
+Use the actual database row consistently instead of returning a second custom user object:
+
+```js
+const findOrCreateUser = async (profile) => {
+  const providerUserId = profile.id;
+  const email = profile.emails?.[0]?.value;
+
+  if (!email) {
+    throw new Error("Google profile did not include an email address");
+  }
+
+  const existingUser = await Users.findOne({
+    where: {
+      authProvider: "google",
+      providerUserId,
+    },
+  });
+
+  if (existingUser) {
+    return existingUser;
+  }
+
+  const username = `${profile.displayName || "player"}_${profile.id}`
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_")
+    .slice(0, 255);
+
+  const user = await sequelize.transaction(async (transaction) => {
+    const newUser = await Users.create(
+      {
+        email,
+        username,
+        authProvider: "google",
+        providerUserId,
+      },
+      { transaction }
+    );
+
+    await Subscriptions.create(
+      {
+        userId: newUser.userId,
+        status: "pending_payment",
+      },
+      { transaction }
+    );
+
+    return newUser;
+  });
+
+  return user;
+};
+```
+
+Then Passport receives the actual Sequelize user:
+
+```js
+async (accessToken, refreshToken, profile, done) => {
+  try {
+    const user = await findOrCreateUser(profile);
+    return done(null, user);
+  } catch (error) {
+    return done(error, null);
+  }
+}
+```
+
+### 4. Create the JWT using only `userId`
+
+```js
+const token = jwt.sign(
+  {
+    userId: req.user.userId,
+  },
+  JWT_SECRET,
+  { expiresIn: "1h" }
+);
+```
+
+The username and email come from the database later through:
+
+```js
+req.user.username
+req.user.email
+```
+
+### 5. Keep subscription status separate
+
+Your `Users` table should contain user information:
+
+```js
+req.user.userId
+req.user.username
+req.user.email
+```
+
+Your `Subscriptions` table should contain subscription information:
+
+```js
+req.subscription.status
+```
+
+Your middleware is correctly structured if it does this:
+
+```js
+export const requireActiveSubscription = async (req, res, next) => {
+  const subscription = await Subscriptions.findOne({
+    where: { userId: req.user.userId },
+  });
+
+  if (subscription?.status !== "active") {
+    return res.status(403).json({
+      error: "Subscription required.",
+    });
+  }
+
+  req.subscription = subscription;
+  next();
+};
+```
+
+### 6. Fix `/api/me`
+
+Return a combined response for the frontend:
+
+```js
+router.get("/api/me", authenticateToken, async (req, res) => {
+  const subscription = await Subscriptions.findOne({
+    where: { userId: req.user.userId },
+  });
+
+  return res.json({
+    user: {
+      userId: req.user.userId,
+      username: req.user.username,
+      email: req.user.email,
+      subscriptionStatus: subscription?.status || "pending_payment",
+    },
+  });
+});
+```
+
+Then the frontend should use:
+
+```js
+user.username
+user.email
+user.subscriptionStatus
+```
+
+The main bug I see is `profile.userId`. Change that to `profile.id` first; otherwise new Google users may not be created correctly.

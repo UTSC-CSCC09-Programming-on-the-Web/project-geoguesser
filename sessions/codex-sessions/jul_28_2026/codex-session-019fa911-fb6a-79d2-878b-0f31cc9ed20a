@@ -1,0 +1,319 @@
+# I am trying to implement POST /games/start. This should che…
+
+> I am trying to implement POST /games/start.
+>
+> This should check to see if the current user has a game that is in_progress. If so, it will get the round information for that game and return roundNumber, imageId.
+>
+> If current user does not have a game in progress, we will create a new game on the backend corresponding to the user. Then I will create a round 1 corresponding to that game, picking a random location from locations for the image_id, and then return roundNumber, imageId.
+>
+> question 1) Can you help me write this code?
+> question 2) How would I enforce that each user has at most 1 game in_progress for the database in the sql schema and in the model?
+
+<details><summary>1 previous message</summary>
+
+> I’ll inspect the existing game/round/location models, routes, and database setup, then I’ll implement the endpoint in the project’s current style and add the database-level invariant for one in-progress game per user.
+
+</details>
+
+I’m ready to implement this, but the workspace terminal is currently failing before commands execute, so I can’t safely inspect or modify the project files.
+
+The intended design is:
+
+- `POST /games/start`:
+  1. Authenticate the user.
+  2. Find their `in_progress` game.
+  3. If found, find its current round and return `{ roundNumber, imageId }`.
+  4. Otherwise create a game, select a random location, create round 1, and return the same shape.
+  5. Wrap creation in a transaction to avoid partial games/rounds.
+
+- PostgreSQL constraint:
+
+```sql
+CREATE UNIQUE INDEX one_in_progress_game_per_user
+ON games (user_id)
+WHERE status = 'in_progress';
+```
+
+The Sequelize model should also define the status enum and an index:
+
+```js
+indexes: [
+  {
+    unique: true,
+    fields: ["user_id"],
+    where: { status: "in_progress" },
+  },
+];
+```
+
+However, the partial unique index is the authoritative enforcement; application checks alone are vulnerable to concurrent requests.
+
+> 1: Can you generate the code and show me so I can write it in myself?
+> 2: Can you show me where to write in the `indexes: [ ... ]` portion in games.js?
+> 3: Can you show me where to write in the `CREATE UNIQUE INDEX one_in_progress_game_per_user` in the sql schema?
+
+<details><summary>1 previous message</summary>
+
+> Plan
+>
+> # Implement `POST /games/start`
+>
+> ## Summary
+>
+> Add the endpoint so an authenticated user resumes their existing in-progress game, or creates a new game with a randomly selected location for round 1.
+>
+> Because `app.js` mounts `gameRouter` at `/games`, the router route must be `POST /start`; this produces the public endpoint `POST /games/start`. Using `gameRouter.post("/games/start")` would incorrectly produce `/games/games/start`.
+>
+> ## Route implementation
+>
+> Replace the empty handler in `routers/gameRouter.js` with:
+>
+> ```js
+> import { Router } from "express";
+> import { sequelize } from "../database/datasource.js";
+> import { Games, Locations, Rounds } from "../database/models/models.js";
+>
+> export const gameRouter = Router();
+>
+> gameRouter.post("/start", async (req, res) => {
+>   const userId = req.user.userId;
+>
+>   try {
+>     const result = await sequelize.transaction(async (transaction) => {
+>       // Resume the user's existing in-progress game.
+>       const existingGame = await Games.findOne({
+>         where: {
+>           userId,
+>           status: "in_progress",
+>         },
+>         order: [["gameId", "DESC"]],
+>         transaction,
+>       });
+>
+>       if (existingGame) {
+>         const currentRound = await Rounds.findOne({
+>           where: {
+>             gameId: existingGame.gameId,
+>           },
+>           order: [["roundNumber", "DESC"]],
+>           transaction,
+>         });
+>
+>         if (!currentRound) {
+>           throw new Error("In-progress game has no rounds");
+>         }
+>
+>         return {
+>           roundNumber: currentRound.roundNumber,
+>           imageId: currentRound.imageId,
+>         };
+>       }
+>
+>       // Select one random location for the new game's first round.
+>       const [location] = await Locations.findAll({
+>         order: sequelize.random(),
+>         limit: 1,
+>         transaction,
+>       });
+>
+>       if (!location) {
+>         throw new Error("No locations available");
+>       }
+>
+>       const newGame = await Games.create(
+>         {
+>           userId,
+>           status: "in_progress",
+>         },
+>         { transaction },
+>       );
+>
+>       const firstRound = await Rounds.create(
+>         {
+>           gameId: newGame.gameId,
+>           roundNumber: 1,
+>           imageId: location.imageId,
+>         },
+>         { transaction },
+>       );
+>
+>       return {
+>         roundNumber: firstRound.roundNumber,
+>         imageId: firstRound.imageId,
+>       };
+>     });
+>
+>     return res.status(200).json(result);
+>   } catch (error) {
+>     console.error("Unable to start game:", error);
+>
+>     return res.status(500).json({
+>       error: "Unable to start game",
+>     });
+>   }
+> });
+> ```
+>
+> The response is:
+>
+> ```json
+> {
+>   "roundNumber": 1,
+>   "imageId": "some-image-id"
+> }
+> ```
+>
+> For an existing game, `roundNumber` is the highest round currently stored for that game.
+>
+> ## `indexes: [...]` placement in `database/models/games.js`
+>
+> Add `indexes` inside the third argument to `sequelize.define`, alongside `tableName` and `timestamps`.
+>
+> Change the bottom of `database/models/games.js` from:
+>
+> ```js
+>   { tableName: "Games", timestamps: false },
+> );
+> ```
+>
+> to:
+>
+> ```js
+>   {
+>     tableName: "Games",
+>     timestamps: false,
+>     indexes: [
+>       {
+>         name: "one_in_progress_game_per_user",
+>         unique: true,
+>         fields: ["user_id"],
+>         where: {
+>           status: "in_progress",
+>         },
+>       },
+>     ],
+>   },
+> );
+> ```
+>
+> The complete model ending should look like:
+>
+> ```js
+> export const Games = sequelize.define(
+>   "Games",
+>   {
+>     // existing attributes remain unchanged
+>   },
+>   {
+>     tableName: "Games",
+>     timestamps: false,
+>     indexes: [
+>       {
+>         name: "one_in_progress_game_per_user",
+>         unique: true,
+>         fields: ["user_id"],
+>         where: {
+>           status: "in_progress",
+>         },
+>       },
+>     ],
+>   },
+> );
+> ```
+>
+> The `fields` value uses the database column name, `user_id`, not the Sequelize property name, `userId`.
+>
+> ## `CREATE UNIQUE INDEX` placement in `database/schema.sql`
+>
+> Place the index immediately after the `Games` table definition and before the `Rounds` table definition:
+>
+> ```sql
+> -- Games table
+> CREATE TABLE IF NOT EXISTS "Games" (
+>     game_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+>     user_id INTEGER NOT NULL,
+>     status VARCHAR(255) NOT NULL DEFAULT 'in_progress',
+>
+>     CONSTRAINT game_status_valid CHECK (
+>         status in ('in_progress', 'completed', 'abandoned')
+>     ),
+>
+>     CONSTRAINT games_user_foreign_key
+>         FOREIGN KEY (user_id)
+>         REFERENCES "Users"(user_id)
+>         ON UPDATE CASCADE
+>         ON DELETE CASCADE
+> );
+>
+> -- Enforce at most one active game per user.
+> CREATE UNIQUE INDEX one_in_progress_game_per_user
+>     ON "Games" (user_id)
+>     WHERE status = 'in_progress';
+>
+> -- Rounds table
+> CREATE TABLE IF NOT EXISTS "Rounds" (
+>     -- existing Rounds definition remains unchanged
+> );
+> ```
+>
+> This is a partial unique index: a user may have many completed or abandoned games, but only one game whose status is `in_progress`.
+>
+> ## Test plan
+>
+> Verify these cases:
+>
+> 1. A user with no game receives a newly created game and round 1.
+> 2. Calling the endpoint again returns the same in-progress round instead of creating another game.
+> 3. A user with a completed game receives a new game.
+> 4. Two concurrent start requests cannot create two in-progress games because PostgreSQL rejects the duplicate through the unique index.
+> 5. The endpoint returns an error when the `Locations` table is empty.
+> 6. The actual URL is `POST /games/start`.
+>
+> ## Assumptions
+>
+> - `req.user.userId` is the authenticated user identifier, matching the current middleware and model.
+> - `Games.status` is the source of truth for game state.
+> - The current round is the highest-numbered round.
+> - PostgreSQL is the database dialect.
+> - `sequelize.sync({ alter: true })` is currently being used, but the SQL index should also remain in `schema.sql` for a clean database setup.
+
+</details>
+
+I’ll inspect the project files again so the examples match your exact Sequelize definitions, route structure, and SQL schema placement. I’ll only read files and then show you the precise code and insertion points.
+
+> What is a sequelize.transaction?
+
+`sequelize.transaction()` groups multiple database operations into one atomic unit.
+
+In your endpoint, creating a game and creating its first round are logically one action:
+
+```js
+await sequelize.transaction(async (transaction) => {
+  const game = await Games.create(
+    {
+      userId,
+      status: "in_progress",
+    },
+    { transaction },
+  );
+
+  await Rounds.create(
+    {
+      gameId: game.gameId,
+      roundNumber: 1,
+      imageId: location.imageId,
+    },
+    { transaction },
+  );
+});
+```
+
+If every operation succeeds, Sequelize commits the transaction. If any operation fails, Sequelize rolls everything back.
+
+Without a transaction, this could happen:
+
+1. The game is created successfully.
+2. Creating the round fails.
+3. The database is left with an in-progress game that has no round.
+
+With a transaction, either both records are saved or neither record is saved. The `transaction` option must be passed to every database operation that belongs to the transaction.

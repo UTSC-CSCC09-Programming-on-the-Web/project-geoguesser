@@ -1,0 +1,1915 @@
+# Ok, so for now I have created a backend which will return 1…
+
+> Ok, so for now I have created a backend which will return 1 of 3 locations randomized to the frontend to display.
+>
+> I've hard-coded the locations into the backend code, but I can eventually put it into a database.  I'll work with that later.
+>
+> Now I am going to try and implement the "guess submit" button.  At the moment, I have two different frontend js files - one for the guess map, the other for the streetview.  Is this a fine implementation?
+>
+> I realize if I want to implement the "guess submit" button, I would need to implement a calculate distance function, which would calculate the distance from the guess to the actual location.  I would write this code in the guess-map.js file, but would need access to where the actual lat and lng coordinates of the street view are.  Would I store this in the backend, or else how would I access it in the frontend?
+
+<details><summary>1 previous message</summary>
+
+> I’ll inspect the current frontend/backend flow and the two JavaScript files so I can ground the advice in your implementation rather than guess at the architecture.
+</details>
+
+Yes—having separate files for the guess map and Street View is perfectly reasonable. They represent separate responsibilities.
+
+Your backend already returns the actual coordinates:
+
+```js
+{
+  imageId,
+  lat,
+  lng
+}
+```
+
+In `streetview.js`, save the entire response instead of only using `imageId`:
+
+```js
+let actualLocation = null;
+
+fetch("/streetview/random-location")
+  .then((res) => res.json())
+  .then((location) => {
+    actualLocation = location;
+
+    viewer.moveTo(location.imageId).catch((error) => {
+      console.log("Unable to load Mapillary image", error);
+    });
+  });
+```
+
+However, `actualLocation` will be local to `streetview.js`, so `guess_map.js` cannot access it directly. A simple temporary solution is to store it in a shared global object:
+
+```js
+// shared game state
+window.gameState = {
+  actualLocation: null,
+};
+```
+
+Then in `streetview.js`:
+
+```js
+fetch("/streetview/random-location")
+  .then((res) => res.json())
+  .then((location) => {
+    window.gameState.actualLocation = location;
+
+    viewer.moveTo(location.imageId);
+  });
+```
+
+And in `guess_map.js`:
+
+```js
+const submitGuessButton = document.querySelector("#submitGuessBtn");
+
+submitGuessButton.addEventListener("click", () => {
+  if (!currentGuess) {
+    alert("Please guess on the map before submitting");
+    return;
+  }
+
+  const actualLocation = window.gameState.actualLocation;
+
+  if (!actualLocation) {
+    alert("The location is still loading");
+    return;
+  }
+
+  const distance = calculateDistance(
+    currentGuess.lat,
+    currentGuess.lng,
+    actualLocation.lat,
+    actualLocation.lng
+  );
+
+  console.log(`Distance: ${distance} km`);
+});
+```
+
+You can calculate the distance using the Haversine formula, or Leaflet’s built-in method:
+
+```js
+function calculateDistance(lat1, lng1, lat2, lng2) {
+  return L.latLng(lat1, lng1).distanceTo(L.latLng(lat2, lng2)) / 1000;
+}
+```
+
+For your current prototype, calculating the distance in the frontend is fine. Eventually, the backend should calculate the distance and score because frontend values can be modified by the user. A stronger design would be:
+
+1. Backend selects and remembers a location for the current round.
+2. Backend sends the frontend an `imageId` and a `roundId`.
+3. Frontend submits only the guessed coordinates and `roundId`.
+4. Backend looks up the real coordinates and calculates the distance and score.
+
+The important thing is that the submit request must use the same location that was displayed—not randomly select a new location during submission.
+
+> What is the better design choice - should the backend deal with calculating the distance from guess and actual location? Why is the frontend not ideal for this?
+
+The better design is for the backend to calculate the distance and score.
+
+The frontend should send:
+
+```json
+{
+  "roundId": "abc123",
+  "guess": {
+    "lat": 43.7,
+    "lng": -79.4
+  }
+}
+```
+
+The backend should then:
+
+1. Find the actual location for `roundId`.
+2. Calculate the distance.
+3. Calculate the score.
+4. Return the result.
+
+The frontend is not ideal because it is controlled by the user. Someone could modify the JavaScript, change the actual coordinates, submit a fake distance, or alter the score before displaying it. This matters especially if scores are saved, shared, or compared on a leaderboard.
+
+The backend also ensures that every client uses the same distance formula, rounding rules, and scoring system.
+
+For a simple prototype with no persistent scores, frontend calculation is acceptable and easier. But design-wise, I would recommend:
+
+- Backend sends the `imageId` and a `roundId`.
+- Backend keeps the actual coordinates associated with that round.
+- Frontend sends only the user’s guessed coordinates.
+- Backend returns the calculated distance and score.
+
+The key requirement is that the backend remembers the exact location selected for that round, rather than choosing a new random location when the guess is submitted.
+
+> Ok, take a look at my code in streetviewRouter.js.  I've made an express endpoint called POST /streetview/calculate-distance, which is supposed to be given the guess coordinates, and then I'm to calculate the distance between the guess and the actual location.
+>
+> How do I access to the Leaflet distanceTo function in my router to do this calculation, or do you have another recommendation?
+>
+> Please let me know if my arrangement can be improved on
+
+<details><summary>1 previous message</summary>
+
+> I’ll inspect the updated router and frontend flow, especially how the actual location is associated with a round, then I’ll recommend whether to reuse Leaflet or move the calculation into a backend-friendly utility.
+</details>
+
+Leaflet’s `distanceTo()` is not the right choice in your router. Leaflet is primarily a browser library and is not available in your Node/Express backend.
+
+Use a small backend utility implementing the Haversine formula, or install a Node-compatible library such as Turf. For your project, the utility is simple enough:
+
+```js
+function calculateDistance(lat1, lng1, lat2, lng2) {
+  const earthRadiusKm = 6371;
+
+  const toRadians = (degrees) => (degrees * Math.PI) / 180;
+
+  const latDifference = toRadians(lat2 - lat1);
+  const lngDifference = toRadians(lng2 - lng1);
+
+  const a =
+    Math.sin(latDifference / 2) ** 2 +
+    Math.cos(toRadians(lat1)) *
+      Math.cos(toRadians(lat2)) *
+      Math.sin(lngDifference / 2) ** 2;
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return earthRadiusKm * c;
+}
+```
+
+Then your endpoint could use it like this:
+
+```js
+streetviewRouter.post("/calculate-distance", (req, res) => {
+  const guessLat = Number(req.body.guessLat);
+  const guessLng = Number(req.body.guessLng);
+
+  const validGuess =
+    Number.isFinite(guessLat) &&
+    Number.isFinite(guessLng) &&
+    guessLat >= -90 &&
+    guessLat <= 90 &&
+    guessLng >= -180 &&
+    guessLng <= 180;
+
+  if (!validGuess) {
+    return res.status(400).json({
+      error: "Guess latitude/longitude is not valid",
+    });
+  }
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return res.status(400).json({
+      error: "No active location exists",
+    });
+  }
+
+  const distanceKm = calculateDistance(
+    lat,
+    lng,
+    guessLat,
+    guessLng,
+  );
+
+  res.json({ distanceKm });
+});
+```
+
+Your current arrangement has three important issues:
+
+1. `calculateDistance` is not currently defined.
+
+2. This validation response needs `return`:
+
+   ```js
+   return res.status(400).json(...);
+   ```
+
+   Otherwise the code continues and may attempt to send two responses.
+
+3. Global `lat` and `lng` are unsafe for multiple users. If two users request locations, the second request overwrites the coordinates used by the first user’s submission.
+
+For a single-user prototype, your globals will work temporarily. A better design is to create a `roundId` when selecting the location:
+
+```js
+import crypto from "crypto";
+
+const activeRounds = new Map();
+
+streetviewRouter.get("/random-location", (req, res) => {
+  const randomIndex = Math.floor(Math.random() * locations.length);
+  const location = locations[randomIndex];
+  const roundId = crypto.randomUUID();
+
+  activeRounds.set(roundId, location);
+
+  res.json({
+    roundId,
+    imageId: location.imageId,
+  });
+});
+```
+
+Then submit the `roundId` with the guess:
+
+```js
+body: JSON.stringify({
+  roundId,
+  guessLat: currentGuess.lat,
+  guessLng: currentGuess.lng,
+})
+```
+
+The backend can retrieve the correct actual location:
+
+```js
+const location = activeRounds.get(req.body.roundId);
+
+if (!location) {
+  return res.status(404).json({
+    error: "Round not found",
+  });
+}
+```
+
+This keeps the actual coordinates authoritative on the backend and ensures the submitted guess is calculated against the same location that was displayed.
+
+> I am creating a backend router called streetviewRouter.js.  I define some helper functions (calculateDistance, toRadians) that I use in that file, but I want to separate it into a separate file.  Where would I save this separate file in my application directories at the moment, and I am assuming I would export the function calculateDistance?
+
+Create a backend-only utility directory at the project root:
+
+```text
+project-geoguesser/
+├── routers/
+│   └── streetviewRouter.js
+├── utils/
+│   └── distance.js
+├── static/
+└── app.js
+```
+
+Use [`utils/distance.js`](<./utils/distance.js>):
+
+```js
+export function toRadians(degrees) {
+  return (degrees * Math.PI) / 180;
+}
+
+export function calculateDistance(lat1, lng1, lat2, lng2) {
+  const earthRadiusKm = 6371;
+
+  const latDifference = toRadians(lat2 - lat1);
+  const lngDifference = toRadians(lng2 - lng1);
+
+  const a =
+    Math.sin(latDifference / 2) ** 2 +
+    Math.cos(toRadians(lat1)) *
+      Math.cos(toRadians(lat2)) *
+      Math.sin(lngDifference / 2) ** 2;
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return earthRadiusKm * c;
+}
+```
+
+Then import it in [`streetviewRouter.js`](<./routers/streetviewRouter.js>):
+
+```js
+import { Router } from "express";
+import { calculateDistance } from "../utils/distance.js";
+```
+
+Because your `package.json` uses `"type": "module"`, use `export` and `import`, and include the `.js` extension.
+
+Do not place this file inside `static/`; that directory is for browser-accessible frontend files.
+
+> Ok, so here's my suggested implementation, and you tell me if this is scalable / has any issues / does not work.
+>
+> Eventually, a game on my GeoGuesser website is going to have three rounds.  So I'm going to have a database.  In the database, I'm going to have two tables.  The Round table has the columns "round id" and "image id".  The Location table has the columns "image id", "lat", "lng".  The image id from the Round and the Location table are foreign key pairs.
+>
+> The goal is going to be when a round starts, we generate a new round id and randomly choose one of the pre-existing image id's from the Location table.  Then we send round id and image id to the front end to display.  Then the user is going to guess by submitting the guess button. This will send a POST request to the backend. The request will send the round id, the guess lat, and the guess lng.  Then on the backend, I will calculate the distance between the actual location and the guessed location, and return the distance.
+>
+> How does this sound?
+
+Your design is fundamentally sound: the backend selects the location, the frontend sends only the guess, and the backend calculates the distance authoritatively.
+
+The main improvement is that you probably need a `Game` table as well. A `Round` should represent one round belonging to a particular three-round game.
+
+Recommended structure:
+
+```text
+Game
+- game_id
+- status
+- created_at
+
+Round
+- round_id
+- game_id          FK → Game.game_id
+- round_number     1, 2, or 3
+- image_id         FK → Location.image_id
+- guess_lat
+- guess_lng
+- distance_km
+- score
+- submitted_at
+
+Location
+- image_id         PRIMARY KEY
+- lat
+- lng
+```
+
+Your foreign-key relationship is correct:
+
+```text
+Round.image_id → Location.image_id
+```
+
+The flow could be:
+
+```text
+POST /games
+→ creates a game and selects round 1
+→ returns gameId, roundId, imageId
+
+POST /rounds/:roundId/guess
+→ receives guessLat and guessLng
+→ loads the actual coordinates through Round → Location
+→ calculates and stores distance/score
+→ returns the result
+
+POST /games/:gameId/rounds
+→ creates the next round
+```
+
+For a small prototype, your endpoint name is fine:
+
+```text
+POST /streetview/calculate-distance
+```
+
+As the application grows, a resource-based endpoint such as this is clearer:
+
+```text
+POST /rounds/:roundId/guess
+```
+
+Important safeguards:
+
+- Generate `round_id` using a UUID or database-generated ID.
+- Validate latitude and longitude on the backend.
+- Prevent a round from being submitted more than once.
+- Ensure the round belongs to the current game/user.
+- Decide whether the same location may appear twice in one game. If not, enforce that when selecting locations.
+- Store the calculated distance and score if you want game history or leaderboards.
+- Use a string type for `image_id` if possible; external image providers may not always use numeric IDs.
+
+Avoid storing the current actual location in global backend variables. That will break when multiple users play simultaneously. The database should be the source of truth, and the backend should load the location using the submitted `roundId`.
+
+One minor scalability note: selecting with SQL such as `ORDER BY RANDOM()` is acceptable for a small location table, but can become slow with a very large one. You can optimize that later.
+
+> For a row in the Round table, I would have to change the row at some point after user guess if I wanted to include guessLat and guessLng in the table.  In other words, an entry would be generated in the Round table, but with guessLat and guessLng as null, but then be modified after the user guess comes in.  Is this the right way to do it
+
+Yes. For a game where each round allows one guess, this is a normal design.
+
+When the round starts:
+
+```text
+round_id     game_id     image_id     guess_lat   guess_lng   distance_km   status
+abc123       game1       image7       NULL        NULL        NULL          active
+```
+
+After submission, update the same row:
+
+```text
+round_id     game_id     image_id     guess_lat   guess_lng   distance_km   status
+abc123       game1       image7       43.7        -79.4       12.5           submitted
+```
+
+You should use `NULL`, not `0`, because `0, 0` is a valid geographic coordinate.
+
+Useful columns would be:
+
+```text
+guess_lat
+guess_lng
+distance_km
+score
+status
+submitted_at
+```
+
+The backend should only update the row if it is still active:
+
+```sql
+UPDATE rounds
+SET
+  guess_lat = ?,
+  guess_lng = ?,
+  distance_km = ?,
+  score = ?,
+  status = 'submitted',
+  submitted_at = CURRENT_TIMESTAMP
+WHERE round_id = ?
+  AND status = 'active';
+```
+
+If the user may submit multiple guesses, or you want to preserve guess history, use a separate `Guesses` table instead:
+
+```text
+Guess
+- guess_id
+- round_id
+- guess_lat
+- guess_lng
+- distance_km
+- score
+- created_at
+```
+
+For your current design—one guess per round—updating the existing `Round` row is the simpler and appropriate choice.
+
+> Ok so I've created rough templates for the Rounds, Games, and Locations table.  I need help writing the code.  Also, I want to create the right foreign key relationships between all the tables.
+>
+> In the Rounds table, I want the gameId to correspond to gameIds from the Game table, and want imageIds to correspond to imageIds from the Location table.
+>
+> I'm assuming I need to create a "belongsTo" and "hasMany" relationship in each of the rounds.js, games.js, and locations.js files
+
+<details><summary>3 previous messages</summary>
+
+> I’ll inspect the current model files, package configuration, and database setup first. Then I’ll map the foreign keys and ORM associations to the exact conventions already used in your project, without changing files yet.
+>
+> The project is using Sequelize with PostgreSQL, and the model files are still rough definitions. I also found the existing `utility/distance.js`, so the database work can reuse the project’s current structure.
+>
+> One important implementation choice remains: how you want Sequelize to create/update the PostgreSQL tables. I’ll inspect the README and scripts to see whether the project already assumes migrations or `sequelize.sync()` before asking you to choose.
+>
+> Plan
+>
+> # Sequelize Models and Foreign-Key Relationships
+>
+> ## Summary
+>
+> Complete the three Sequelize models using PostgreSQL-compatible types, add explicit foreign keys, and define associations in one central module. Use versioned Sequelize migrations to create the tables in the correct order.
+>
+> The relationship structure will be:
+>
+> ```text
+> Game 1 ────< Round >──── 1 Location
+> ```
+>
+> - One `Game` has many `Round` records.
+> - Each `Round` belongs to one `Game`.
+> - One `Location` may be used by many `Round` records.
+> - Each `Round` belongs to one `Location`.
+>
+> ## Model changes
+>
+> Update the model definitions with these attributes:
+>
+> - `Game`
+>   - `gameId`: integer primary key, auto-incrementing.
+>
+> - `Location`
+>   - `imageId`: `BIGINT` primary key.
+>   - `lat`: `DOUBLE`, required, range `-90` to `90`.
+>   - `lng`: `DOUBLE`, required, range `-180` to `180`.
+>
+> - `Round`
+>   - `roundId`: integer primary key, auto-incrementing.
+>   - `roundNumber`: integer, required.
+>   - `gameId`: integer, required, references `Games.game_id`.
+>   - `imageId`: `BIGINT`, required, references `Locations.image_id`.
+>   - `guessLat`: nullable `DOUBLE`.
+>   - `guessLng`: nullable `DOUBLE`.
+>   - `distance`: nullable `DOUBLE`.
+>   - `score`: nullable integer.
+>   - `status`: required string with default value `"active"`.
+>   - `submittedAt`: nullable date.
+>
+> Use camelCase JavaScript attributes with snake_case database column names, for example:
+>
+> ```js
+> guessLat: {
+>   type: DataTypes.DOUBLE,
+>   allowNull: true,
+>   field: "guess_lat",
+> }
+> ```
+>
+> Add a unique constraint on `(game_id, round_number)` so a game cannot contain two rounds with the same round number.
+>
+> ## Associations
+>
+> Create a central association module, such as `database/models/index.js`, that imports all three models and defines:
+>
+> ```js
+> Game.hasMany(Round, {
+>   foreignKey: "gameId",
+>   as: "rounds",
+>   onDelete: "CASCADE",
+> });
+>
+> Round.belongsTo(Game, {
+>   foreignKey: "gameId",
+>   as: "game",
+> });
+>
+> Location.hasMany(Round, {
+>   foreignKey: "imageId",
+>   as: "rounds",
+>   onDelete: "RESTRICT",
+> });
+>
+> Round.belongsTo(Location, {
+>   foreignKey: "imageId",
+>   as: "location",
+> });
+> ```
+>
+> The associations should be defined after all models are imported to avoid circular-import problems.
+>
+> This will allow queries such as:
+>
+> ```js
+> Round.findByPk(roundId, {
+>   include: [Game, Location],
+> });
+> ```
+>
+> and:
+>
+> ```js
+> Game.findByPk(gameId, {
+>   include: "rounds",
+> });
+> ```
+>
+> ## Migrations
+>
+> Use Sequelize migrations rather than `sequelize.sync()`.
+>
+> Create the tables in this order:
+>
+> 1. `Locations`
+> 2. `Games`
+> 3. `Rounds`
+>
+> The `Rounds` migration should add:
+>
+> - A foreign key from `game_id` to `Games.game_id`.
+> - A foreign key from `image_id` to `Locations.image_id`.
+> - A unique constraint for `game_id` and `round_number`.
+> - Indexes on `game_id` and `image_id`.
+>
+> Use `CASCADE` when deleting a game so its rounds are removed with it. Use `RESTRICT` when deleting a location so a location cannot be deleted while rounds still reference it.
+>
+> ## Test plan
+>
+> Verify that:
+>
+> - A location can be inserted with valid coordinates.
+> - Invalid latitude or longitude values are rejected.
+> - A round cannot reference a nonexistent game.
+> - A round cannot reference a nonexistent location.
+> - A game can have three rounds.
+> - Two rounds in the same game cannot share the same `round_number`.
+> - A round starts with nullable guess/result fields.
+> - Submitting a guess updates `guessLat`, `guessLng`, `distance`, `score`, `status`, and `submittedAt`.
+> - A game can load its associated rounds.
+> - A round can load its associated game and location.
+> - Deleting a game deletes its rounds.
+> - Deleting a referenced location is rejected.
+>
+> ## Assumptions
+>
+> - Each round allows one submitted guess.
+> - The same location may be reused in different games.
+> - The same location should not be reused within one game; enforce this later with game-level location-selection logic if that rule is required.
+> - Existing integer game IDs will be preserved, and round IDs will use the same integer style.
+> - The database tables will use the existing names, but model attributes will use camelCase while database columns use snake_case.
+</details>
+
+> What was the alternate option to migrations? What is migrations?
+
+The alternative was `sequelize.sync()`.
+
+A migration is a versioned database-change file. It explicitly describes how to create or modify tables.
+
+Example:
+
+```js
+export async function up({ context: queryInterface }) {
+  await queryInterface.createTable("games", {
+    game_id: {
+      type: Sequelize.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+  });
+}
+
+export async function down({ context: queryInterface }) {
+  await queryInterface.dropTable("games");
+}
+```
+
+You run migrations to apply those changes:
+
+```text
+Migration 001: create games
+Migration 002: create locations
+Migration 003: create rounds
+Migration 004: add score to rounds
+```
+
+The migration system records which migrations have already run, so your database can be updated safely and consistently across development, testing, and production.
+
+`sequelize.sync()` works differently. It examines your Sequelize models at application startup and tries to make the database tables match them:
+
+```js
+await sequelize.sync();
+```
+
+Useful variants include:
+
+```js
+await sequelize.sync({ alter: true });  // attempts to modify existing tables
+await sequelize.sync({ force: true });  // drops and recreates tables
+```
+
+`sync()` is convenient while experimenting, but `alter` can produce unexpected schema changes and `force` destroys data. It also does not provide a clear history of how your schema evolved.
+
+For your project:
+
+- `sequelize.sync()` is simpler for an early prototype.
+- Migrations are the better long-term choice once you have persistent data or multiple developers.
+
+Your Sequelize models still define the application’s attributes and relationships; migrations define how those structures are created and changed in PostgreSQL.
+
+> Ok, I'm open to migrations as an option. Can you provide me the code for the Sequelize Models and Foreign-Key Relationships plan you outlined above. I want to write the code myself
+
+Yes. Below is code you can type into your project yourself. I recommend using singular Sequelize model names (`Game`, `Round`, `Location`) while keeping your existing table names.
+
+## 1. `database/models/games.js`
+
+```js
+import { DataTypes } from "sequelize";
+import { sequelize } from "../datasource.js";
+
+export const Game = sequelize.define(
+  "Game",
+  {
+    gameId: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+      allowNull: false,
+      field: "game_id",
+    },
+  },
+  {
+    tableName: "Games",
+    timestamps: false,
+  },
+);
+```
+
+## 2. `database/models/locations.js`
+
+Your existing file is mostly correct:
+
+```js
+import { DataTypes } from "sequelize";
+import { sequelize } from "../datasource.js";
+
+export const Location = sequelize.define(
+  "Location",
+  {
+    imageId: {
+      type: DataTypes.BIGINT,
+      primaryKey: true,
+      allowNull: false,
+      field: "image_id",
+    },
+
+    lat: {
+      type: DataTypes.DOUBLE,
+      allowNull: false,
+      validate: {
+        min: -90,
+        max: 90,
+      },
+    },
+
+    lng: {
+      type: DataTypes.DOUBLE,
+      allowNull: false,
+      validate: {
+        min: -180,
+        max: 180,
+      },
+    },
+  },
+  {
+    tableName: "Locations",
+    timestamps: false,
+  },
+);
+```
+
+## 3. `database/models/rounds.js`
+
+```js
+import { DataTypes } from "sequelize";
+import { sequelize } from "../datasource.js";
+
+export const Round = sequelize.define(
+  "Round",
+  {
+    roundId: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+      allowNull: false,
+      field: "round_id",
+    },
+
+    roundNumber: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: "round_number",
+      validate: {
+        min: 1,
+        max: 3,
+      },
+    },
+
+    gameId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: "game_id",
+      references: {
+        model: "Games",
+        key: "game_id",
+      },
+      onUpdate: "CASCADE",
+      onDelete: "CASCADE",
+    },
+
+    imageId: {
+      type: DataTypes.BIGINT,
+      allowNull: false,
+      field: "image_id",
+      references: {
+        model: "Locations",
+        key: "image_id",
+      },
+      onUpdate: "CASCADE",
+      onDelete: "RESTRICT",
+    },
+
+    guessLat: {
+      type: DataTypes.DOUBLE,
+      allowNull: true,
+      field: "guess_lat",
+      validate: {
+        min: -90,
+        max: 90,
+      },
+    },
+
+    guessLng: {
+      type: DataTypes.DOUBLE,
+      allowNull: true,
+      field: "guess_lng",
+      validate: {
+        min: -180,
+        max: 180,
+      },
+    },
+
+    distanceKm: {
+      type: DataTypes.DOUBLE,
+      allowNull: true,
+      field: "distance_km",
+    },
+
+    score: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+
+    status: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: "active",
+      validate: {
+        isIn: [["active", "submitted", "skipped"]],
+      },
+    },
+
+    submittedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "submitted_at",
+    },
+  },
+  {
+    tableName: "Rounds",
+    timestamps: false,
+  },
+);
+```
+
+## 4. Create the relationships
+
+Create `database/models/index.js`:
+
+```js
+import { Game } from "./games.js";
+import { Round } from "./rounds.js";
+import { Location } from "./locations.js";
+
+Game.hasMany(Round, {
+  foreignKey: "gameId",
+  as: "rounds",
+  onDelete: "CASCADE",
+});
+
+Round.belongsTo(Game, {
+  foreignKey: "gameId",
+  as: "game",
+});
+
+Location.hasMany(Round, {
+  foreignKey: "imageId",
+  as: "rounds",
+  onDelete: "RESTRICT",
+});
+
+Round.belongsTo(Location, {
+  foreignKey: "imageId",
+  as: "location",
+});
+
+export { Game, Round, Location };
+```
+
+The foreign keys are placed on `Round` because each round belongs to one game and one location:
+
+```text
+Rounds.game_id  → Games.game_id
+Rounds.image_id → Locations.image_id
+```
+
+Import models from `database/models/index.js` elsewhere so the associations are initialized:
+
+```js
+import { Game, Round, Location } from "../database/models/index.js";
+```
+
+## Migration ordering
+
+Your migrations should create tables in this order:
+
+1. `Locations`
+2. `Games`
+3. `Rounds`
+
+`Rounds` must be created last because it references the other two tables.
+
+Also add a unique constraint on:
+
+```text
+(game_id, round_number)
+```
+
+This prevents a game from having two separate rounds both numbered `1`, for example.
+
+For now, keep `guessLat`, `guessLng`, `distanceKm`, `score`, and `submittedAt` nullable because those values do not exist until the player submits a guess.
+
+> import { Game } from "./games.js";
+> import { Round } from "./rounds.js";
+> import { Location } from "./locations.js";
+>
+> Game.hasMany(Round, {
+>   foreignKey: "gameId",
+>   as: "rounds",
+>   onDelete: "CASCADE",
+> });
+>
+> Round.belongsTo(Game, {
+>   foreignKey: "gameId",
+>   as: "game",
+> });
+>
+> Location.hasMany(Round, {
+>   foreignKey: "imageId",
+>   as: "rounds",
+>   onDelete: "RESTRICT",
+> });
+>
+> Round.belongsTo(Location, {
+>   foreignKey: "imageId",
+>   as: "location",
+> });
+>
+> export { Game, Round, Location };
+>
+> 1) For this code, can you explain what the `as` is doing?
+>
+> 2) Also, are we supposed to use for the foreign key "gameId" or "game_id"?  I remember in the code for rounds.js, we wrote `gameId: {
+>       type: DataTypes.INTEGER,
+>       allowNull: false,
+>       field: "game_id",
+>       references: {
+>         model: "Games",
+>         key: "game_id",
+>       },
+>       onUpdate: "CASCADE",
+>       onDelete: "CASCADE",
+>     }`, where the key used "game_id".  So when do we use the SQL column and when do we use the javascript attribute?
+>
+> 3) Do we have to specify the onDelete and onUpdate in Game.hasMany or Round.belongsTo? Why do we have to specify this again if we've already done it in the rounds.js?
+
+### 1. What does `as` do?
+
+`as` defines an alias for the relationship. It controls how you access the associated records.
+
+```js
+Game.hasMany(Round, {
+  foreignKey: "gameId",
+  as: "rounds",
+});
+```
+
+This allows:
+
+```js
+const game = await Game.findByPk(1, {
+  include: {
+    model: Round,
+    as: "rounds",
+  },
+});
+```
+
+It also enables instance methods such as:
+
+```js
+game.getRounds();
+round.getGame();
+round.getLocation();
+location.getRounds();
+```
+
+The alias is a JavaScript name. It is not a database column.
+
+---
+
+### 2. `gameId` versus `game_id`
+
+Use the JavaScript attribute name when working with Sequelize models:
+
+```js
+gameId
+imageId
+guessLat
+```
+
+Use the database column name when referring to PostgreSQL columns:
+
+```js
+game_id
+image_id
+guess_lat
+```
+
+This model definition maps the two names:
+
+```js
+gameId: {
+  type: DataTypes.INTEGER,
+  field: "game_id",
+}
+```
+
+Therefore:
+
+```js
+round.gameId
+```
+
+refers internally to:
+
+```text
+Rounds.game_id
+```
+
+In the association, use the JavaScript attribute:
+
+```js
+Game.hasMany(Round, {
+  foreignKey: "gameId",
+});
+```
+
+In the model’s `references` configuration, use the actual database column:
+
+```js
+references: {
+  model: "Games",
+  key: "game_id",
+}
+```
+
+A useful rule is:
+
+| Situation | Name to use |
+|---|---|
+| JavaScript code | `gameId` |
+| Sequelize attribute definition | property is `gameId` |
+| Association `foreignKey` | `gameId` |
+| PostgreSQL column | `game_id` |
+| `references.key` | `game_id` |
+| SQL migration | `game_id` |
+
+---
+
+### 3. Do `onDelete` and `onUpdate` need to be repeated?
+
+No. Since you are using migrations, the migration should be the authoritative place for database constraints:
+
+```js
+references: {
+  model: "Games",
+  key: "game_id",
+},
+onUpdate: "CASCADE",
+onDelete: "CASCADE",
+```
+
+Your associations can simply describe the relationships:
+
+```js
+Game.hasMany(Round, {
+  foreignKey: "gameId",
+  as: "rounds",
+});
+
+Round.belongsTo(Game, {
+  foreignKey: "gameId",
+  as: "game",
+});
+```
+
+Likewise:
+
+```js
+Location.hasMany(Round, {
+  foreignKey: "imageId",
+  as: "rounds",
+});
+
+Round.belongsTo(Location, {
+  foreignKey: "imageId",
+  as: "location",
+});
+```
+
+The `onDelete` and `onUpdate` options in the associations are mainly useful when Sequelize is creating the database schema with `sequelize.sync()`. Since migrations create your schema, define those actions in the migrations and avoid duplicating them in the associations.
+
+> Can you explain a bit more about the "as" part, I'm still a bit confused.
+
+Think of `as` as the JavaScript name for the relationship.
+
+It does not rename a database column. It tells Sequelize:
+
+> “When I follow this relationship, call the result this name.”
+
+For example:
+
+```js
+Game.hasMany(Round, {
+  foreignKey: "gameId",
+  as: "rounds",
+});
+```
+
+This means:
+
+> A `Game` has many `Round` objects, and I want to access them through `game.rounds`.
+
+Example query:
+
+```js
+const game = await Game.findByPk(1, {
+  include: {
+    model: Round,
+    as: "rounds",
+  },
+});
+```
+
+Then:
+
+```js
+console.log(game.rounds);
+```
+
+Without `as`, Sequelize might use a default association name. Defining the alias makes the name explicit and is especially important when using `include`.
+
+For the reverse relationship:
+
+```js
+Round.belongsTo(Game, {
+  foreignKey: "gameId",
+  as: "game",
+});
+```
+
+This means:
+
+> A `Round` belongs to one `Game`, and I want to access it through `round.game`.
+
+Example:
+
+```js
+const round = await Round.findByPk(1, {
+  include: {
+    model: Game,
+    as: "game",
+  },
+});
+
+console.log(round.game);
+```
+
+The complete relationship looks like this:
+
+```text
+game.rounds  → many rounds
+round.game   → one game
+
+location.rounds → many rounds
+round.location  → one location
+```
+
+The aliases are directional:
+
+```js
+Game.hasMany(Round, { as: "rounds" });
+Round.belongsTo(Game, { as: "game" });
+```
+
+They do not have to match because they describe different directions.
+
+Also, this:
+
+```js
+as: "rounds"
+```
+
+is unrelated to this:
+
+```js
+foreignKey: "gameId"
+```
+
+`foreignKey` identifies the linking column. `as` identifies the JavaScript property used to access the related object or objects.
+
+> If I did this (without the `as: "rounds"` part)
+> `
+> Game.hasMany(Round, {
+>   foreignKey: "gameId",
+>
+> });`
+>
+> then would this work?
+> `
+> const game = await Game.findByPk(1, {
+>   include: {
+>     model: Round,
+>     as: "rounds",
+>   },
+> });`
+>
+> how about `console.log(game.rounds);`
+>
+> Is the "as" part helping the `game.rounds` portion or the `include` portion, or both?
+
+`as` controls both parts:
+
+1. The name used in `include`.
+2. The property added to the returned object.
+
+If you define:
+
+```js
+Game.hasMany(Round, {
+  foreignKey: "gameId",
+});
+```
+
+then you should generally query it without an alias:
+
+```js
+const game = await Game.findByPk(1, {
+  include: Round,
+});
+```
+
+Sequelize will choose a default alias, usually based on the model name, such as:
+
+```js
+console.log(game.Rounds);
+```
+
+The exact default name can be less obvious, which is why explicit aliases are recommended.
+
+With:
+
+```js
+Game.hasMany(Round, {
+  foreignKey: "gameId",
+  as: "rounds",
+});
+```
+
+you must use the same alias in the query:
+
+```js
+const game = await Game.findByPk(1, {
+  include: {
+    model: Round,
+    as: "rounds",
+  },
+});
+```
+
+And the result will be available as:
+
+```js
+console.log(game.rounds);
+```
+
+So this combination is incorrect:
+
+```js
+Game.hasMany(Round, {
+  foreignKey: "gameId",
+});
+
+include: {
+  model: Round,
+  as: "rounds",
+}
+```
+
+The `as: "rounds"` in the query refers to an association alias that was never defined. Sequelize will typically report that `Round` is associated with `Game` without that alias.
+
+The recommended approach is to define the alias explicitly in both directions:
+
+```js
+Game.hasMany(Round, {
+  foreignKey: "gameId",
+  as: "rounds",
+});
+
+Round.belongsTo(Game, {
+  foreignKey: "gameId",
+  as: "game",
+});
+```
+
+Then:
+
+```js
+game.rounds;
+round.game;
+```
+
+are predictable and readable.
+
+> Ok, so I've written my index.js file within the models section as well now.  How do I do the migrations step you're talking about? Can you show me the code for it?
+
+<details><summary>2 previous messages</summary>
+
+> I’m going to verify the migration setup against the Sequelize tooling version and your project’s ESM configuration before giving you commands, because the `"type": "module"` setting affects migration-file syntax.
+>
+> <details><summary>Searched the web</summary>
+>
+> Searched the web for `site:sequelize.org/docs/v6/other-topics/migrations Sequelize migrations CLI ...`
+>
+> Searched the web for `'package.json'`
+>
+> </details>
+</details>
+
+Yes. Since your project uses `"type": "module"`, there is one extra migration setup detail.
+
+Sequelize migrations contain `up` and `down` functions. `up` applies a schema change; `down` reverses it. Sequelize tracks completed migrations in a `SequelizeMeta` table. ([Sequelize migrations documentation](https://sequelize.org/docs/v6/other-topics/migrations/))
+
+## 1. Install the CLI
+
+Run:
+
+```bash
+npm install --save-dev sequelize-cli
+```
+
+## 2. Add `.sequelizerc`
+
+Create this file in the project root:
+
+```js
+const path = require("path");
+
+module.exports = {
+  config: path.resolve("database", "config", "config.cjs"),
+  "migrations-path": path.resolve("database", "migrations"),
+};
+```
+
+## 3. Add migration database configuration
+
+Create `database/config/config.cjs`:
+
+```js
+require("dotenv").config();
+
+module.exports = {
+  development: {
+    username: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    host: process.env.DB_HOST,
+    port: Number(process.env.DB_PORT),
+    dialect: "postgres",
+  },
+};
+```
+
+Because your project uses ESM, add this file:
+
+`database/migrations/package.json`
+
+```json
+{
+  "type": "commonjs"
+}
+```
+
+This allows Sequelize CLI migrations to use the traditional `module.exports` syntax. The CLI’s ESM support has historically required workarounds in projects using `"type": "module"`. ([Sequelize CLI ESM issue](https://github.com/sequelize/cli/issues/1156))
+
+## 4. Create the migrations directory
+
+```text
+database/
+├── config/
+│   └── config.cjs
+├── migrations/
+│   ├── package.json
+│   ├── 001-create-locations.js
+│   ├── 002-create-games.js
+│   └── 003-create-rounds.js
+└── models/
+```
+
+## 5. Create `001-create-locations.js`
+
+```js
+module.exports = {
+  async up(queryInterface, Sequelize) {
+    await queryInterface.createTable("Locations", {
+      image_id: {
+        type: Sequelize.BIGINT,
+        allowNull: false,
+        primaryKey: true,
+      },
+
+      lat: {
+        type: Sequelize.DOUBLE,
+        allowNull: false,
+      },
+
+      lng: {
+        type: Sequelize.DOUBLE,
+        allowNull: false,
+      },
+    });
+  },
+
+  async down(queryInterface) {
+    await queryInterface.dropTable("Locations");
+  },
+};
+```
+
+## 6. Create `002-create-games.js`
+
+```js
+module.exports = {
+  async up(queryInterface, Sequelize) {
+    await queryInterface.createTable("Games", {
+      game_id: {
+        type: Sequelize.INTEGER,
+        allowNull: false,
+        primaryKey: true,
+        autoIncrement: true,
+      },
+    });
+  },
+
+  async down(queryInterface) {
+    await queryInterface.dropTable("Games");
+  },
+};
+```
+
+## 7. Create `003-create-rounds.js`
+
+```js
+module.exports = {
+  async up(queryInterface, Sequelize) {
+    await queryInterface.createTable("Rounds", {
+      round_id: {
+        type: Sequelize.INTEGER,
+        allowNull: false,
+        primaryKey: true,
+        autoIncrement: true,
+      },
+
+      round_number: {
+        type: Sequelize.INTEGER,
+        allowNull: false,
+      },
+
+      game_id: {
+        type: Sequelize.INTEGER,
+        allowNull: false,
+        references: {
+          model: "Games",
+          key: "game_id",
+        },
+        onUpdate: "CASCADE",
+        onDelete: "CASCADE",
+      },
+
+      image_id: {
+        type: Sequelize.BIGINT,
+        allowNull: false,
+        references: {
+          model: "Locations",
+          key: "image_id",
+        },
+        onUpdate: "CASCADE",
+        onDelete: "RESTRICT",
+      },
+
+      guess_lat: {
+        type: Sequelize.DOUBLE,
+        allowNull: true,
+      },
+
+      guess_lng: {
+        type: Sequelize.DOUBLE,
+        allowNull: true,
+      },
+
+      distance_km: {
+        type: Sequelize.DOUBLE,
+        allowNull: true,
+      },
+
+      score: {
+        type: Sequelize.INTEGER,
+        allowNull: true,
+      },
+
+      status: {
+        type: Sequelize.STRING(20),
+        allowNull: false,
+        defaultValue: "active",
+      },
+
+      submitted_at: {
+        type: Sequelize.DATE,
+        allowNull: true,
+      },
+    });
+
+    await queryInterface.addConstraint("Rounds", {
+      fields: ["game_id", "round_number"],
+      type: "unique",
+      name: "rounds_game_id_round_number_unique",
+    });
+
+    await queryInterface.addIndex("Rounds", ["game_id"], {
+      name: "rounds_game_id_index",
+    });
+
+    await queryInterface.addIndex("Rounds", ["image_id"], {
+      name: "rounds_image_id_index",
+    });
+  },
+
+  async down(queryInterface) {
+    await queryInterface.dropTable("Rounds");
+  },
+};
+```
+
+The foreign keys are created here:
+
+```text
+Rounds.game_id  → Games.game_id
+Rounds.image_id → Locations.image_id
+```
+
+## 8. Run the migrations
+
+```bash
+npx sequelize-cli db:migrate
+```
+
+To check migration status:
+
+```bash
+npx sequelize-cli db:migrate:status
+```
+
+To undo the most recent migration:
+
+```bash
+npx sequelize-cli db:migrate:undo
+```
+
+Since migrations now create your tables, do not also call:
+
+```js
+sequelize.sync();
+```
+
+in your application startup. Use migrations as the source of truth for the database schema.
+
+> Ok, I have decided to not implement migrations for my database yet.  I'm only trying to get a working product going.  I will come back and do migrations once I have a more robust product.  Can you provide me the code changes I need to do to my model and index.js file to implement my database using sequelize.sync()?  In specific, I want to ensure I have the right foreign-keys implemented and also that the (Games.game_id, Rounds.round_id) be unique.
+
+For a prototype, `sequelize.sync()` is reasonable. One important correction first:
+
+`Games.game_id` and `Rounds.round_id` cannot form a useful composite unique constraint because they are columns in different tables, and `round_id` is already unique as the `Rounds` primary key.
+
+You probably want this instead:
+
+```text
+(game_id, round_number)
+```
+
+That ensures each game has only one round numbered `1`, one numbered `2`, and one numbered `3`.
+
+## `database/models/games.js`
+
+```js
+import { DataTypes } from "sequelize";
+import { sequelize } from "../datasource.js";
+
+export const Game = sequelize.define(
+  "Game",
+  {
+    gameId: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+      allowNull: false,
+      field: "game_id",
+    },
+  },
+  {
+    tableName: "Games",
+    timestamps: false,
+  },
+);
+```
+
+## `database/models/locations.js`
+
+```js
+import { DataTypes } from "sequelize";
+import { sequelize } from "../datasource.js";
+
+export const Location = sequelize.define(
+  "Location",
+  {
+    imageId: {
+      type: DataTypes.BIGINT,
+      primaryKey: true,
+      allowNull: false,
+      field: "image_id",
+    },
+
+    lat: {
+      type: DataTypes.DOUBLE,
+      allowNull: false,
+      validate: {
+        min: -90,
+        max: 90,
+      },
+    },
+
+    lng: {
+      type: DataTypes.DOUBLE,
+      allowNull: false,
+      validate: {
+        min: -180,
+        max: 180,
+      },
+    },
+  },
+  {
+    tableName: "Locations",
+    timestamps: false,
+  },
+);
+```
+
+## `database/models/rounds.js`
+
+```js
+import { DataTypes } from "sequelize";
+import { sequelize } from "../datasource.js";
+
+export const Round = sequelize.define(
+  "Round",
+  {
+    roundId: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+      allowNull: false,
+      field: "round_id",
+    },
+
+    roundNumber: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: "round_number",
+      validate: {
+        min: 1,
+        max: 3,
+      },
+    },
+
+    gameId: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      field: "game_id",
+      references: {
+        model: "Games",
+        key: "game_id",
+      },
+      onUpdate: "CASCADE",
+      onDelete: "CASCADE",
+    },
+
+    imageId: {
+      type: DataTypes.BIGINT,
+      allowNull: false,
+      field: "image_id",
+      references: {
+        model: "Locations",
+        key: "image_id",
+      },
+      onUpdate: "CASCADE",
+      onDelete: "RESTRICT",
+    },
+
+    guessLat: {
+      type: DataTypes.DOUBLE,
+      allowNull: true,
+      field: "guess_lat",
+    },
+
+    guessLng: {
+      type: DataTypes.DOUBLE,
+      allowNull: true,
+      field: "guess_lng",
+    },
+
+    distanceKm: {
+      type: DataTypes.DOUBLE,
+      allowNull: true,
+      field: "distance_km",
+    },
+
+    score: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+
+    status: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: "active",
+      validate: {
+        isIn: [["active", "submitted", "skipped"]],
+      },
+    },
+
+    submittedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "submitted_at",
+    },
+  },
+  {
+    tableName: "Rounds",
+    timestamps: false,
+
+    indexes: [
+      {
+        unique: true,
+        fields: ["gameId", "roundNumber"],
+        name: "one_round_number_per_game",
+      },
+    ],
+  },
+);
+```
+
+## `database/models/index.js`
+
+```js
+import { Game } from "./games.js";
+import { Round } from "./rounds.js";
+import { Location } from "./locations.js";
+
+Game.hasMany(Round, {
+  foreignKey: "gameId",
+  as: "rounds",
+});
+
+Round.belongsTo(Game, {
+  foreignKey: "gameId",
+  as: "game",
+});
+
+Location.hasMany(Round, {
+  foreignKey: "imageId",
+  as: "rounds",
+});
+
+Round.belongsTo(Location, {
+  foreignKey: "imageId",
+  as: "location",
+});
+
+export { Game, Round, Location };
+```
+
+The foreign keys are:
+
+```text
+Rounds.game_id  → Games.game_id
+Rounds.image_id → Locations.image_id
+```
+
+## Initialize Sequelize
+
+In `app.js`, import the model index so the associations are registered, then synchronize:
+
+```js
+import express from "express";
+import { sequelize } from "./database/datasource.js";
+import "./database/models/index.js";
+
+const app = express();
+const PORT = 3000;
+
+app.use(express.json());
+app.use(express.static("static"));
+
+try {
+  await sequelize.authenticate();
+  await sequelize.sync();
+
+  console.log("Database connected and synchronized");
+
+  app.listen(PORT, () => {
+    console.log(`Server started on port ${PORT}`);
+  });
+} catch (error) {
+  console.error("Unable to start application:", error);
+}
+```
+
+Use plain `sequelize.sync()` when the tables do not exist yet. For temporary development schema changes, you could use:
+
+```js
+await sequelize.sync({ alter: true });
+```
+
+Avoid `force: true` unless you intentionally want Sequelize to drop and recreate the tables, which deletes existing data.
+
+> Can you confirm for me that for the indexes section in rounds.js, the fields should be the javascript / sequelize versions rather than the sql version? I'm never certain of it
+
+<details><summary>2 previous messages</summary>
+
+> I’ll verify this specific Sequelize behavior against the model/index documentation so the answer distinguishes model attributes from physical SQL column names correctly.
+>
+> <details><summary>Searched the web</summary>
+>
+> Searched the web for `site:sequelize.org/docs/v6 model indexes field attribute field mapping Sequelize indexes fields`
+>
+> </details>
+</details>
+
+Yes. In your `Rounds` model, use the JavaScript/Sequelize attribute names:
+
+```js
+indexes: [
+  {
+    unique: true,
+    fields: ["gameId", "roundNumber"],
+    name: "one_round_number_per_game",
+  },
+],
+```
+
+That is correct because your model defines:
+
+```js
+gameId: {
+  field: "game_id",
+}
+
+roundNumber: {
+  field: "round_number",
+}
+```
+
+Sequelize uses the attribute names in the model definition and translates them to the SQL column names when it creates the index. Therefore, this will create an index on:
+
+```sql
+(game_id, round_number)
+```
+
+The mapping is:
+
+```text
+JavaScript attribute    SQL column
+gameId                  game_id
+roundNumber             round_number
+```
+
+So:
+
+- Model `indexes.fields`: use `gameId`, `roundNumber`.
+- Raw SQL or migration definitions: use `game_id`, `round_number`.
+- `references.key`: use the SQL column name, such as `game_id`.
+
+This follows Sequelize’s model-index behavior and its `field` attribute mapping. ([Sequelize indexes](https://sequelize.org/docs/v6/other-topics/indexes/), [Sequelize naming strategies](https://sequelize.org/docs/v6/other-topics/naming-strategies/))
