@@ -188,6 +188,28 @@ router.post("/api/webhook", async (req, res) => {
   }
 
   try {
+    const setSubscriptionStatus = async ({
+      status,
+      stripeSubscriptionId,
+      stripeCustomerId,
+    }) => {
+      const [updatedBySubscriptionId] = await Subscriptions.update(
+        { status },
+        { where: { stripeSubscriptionId } },
+      );
+
+      if (updatedBySubscriptionId > 0 || !stripeCustomerId) {
+        return updatedBySubscriptionId;
+      }
+
+      const [updatedByCustomerId] = await Subscriptions.update(
+        { status },
+        { where: { stripeCustomerId } },
+      );
+
+      return updatedByCustomerId;
+    };
+
     if (event.type === "checkout.session.completed") {
       const checkoutSession = event.data.object;
       const userId = Number(
@@ -211,12 +233,37 @@ router.post("/api/webhook", async (req, res) => {
       );
     }
 
+    if (event.type === "customer.subscription.updated") {
+      const updatedSubscription = event.data.object;
+      const stripeCustomerId =
+        typeof updatedSubscription.customer === "string"
+          ? updatedSubscription.customer
+          : updatedSubscription.customer?.id;
+
+      if (
+        updatedSubscription.cancel_at_period_end ||
+        updatedSubscription.status === "canceled"
+      ) {
+        await setSubscriptionStatus({
+          status: "pending_payment",
+          stripeSubscriptionId: updatedSubscription.id,
+          stripeCustomerId,
+        });
+      }
+    }
+
     if (event.type === "customer.subscription.deleted") {
       const deletedSubscription = event.data.object;
-      await Subscriptions.update(
-        { status: "pending_payment" },
-        { where: { stripeSubscriptionId: deletedSubscription.id } },
-      );
+      const stripeCustomerId =
+        typeof deletedSubscription.customer === "string"
+          ? deletedSubscription.customer
+          : deletedSubscription.customer?.id;
+
+      await setSubscriptionStatus({
+        status: "pending_payment",
+        stripeSubscriptionId: deletedSubscription.id,
+        stripeCustomerId,
+      });
     }
   } catch (error) {
     return res.status(500).json({ error: "Failed to process webhook event" });
