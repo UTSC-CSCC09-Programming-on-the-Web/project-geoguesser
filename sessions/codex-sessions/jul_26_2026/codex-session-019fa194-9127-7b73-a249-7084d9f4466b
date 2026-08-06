@@ -1,0 +1,155 @@
+# Im trying to improve my ai review button event listener in…
+
+> Im trying to improve my ai review button event listener in guess_map.js.
+>
+> At the moment, the request sent to the backend is hard-coded. Is there a way I can either read the imageId of the streetview being displayed, or keep track of a variable in the frontend of streetview.js that is accessible in guess_map.js that will allow me access to the imageId of the location?
+
+<details><summary>3 previous messages</summary>
+
+> I’ll inspect `guess_map.js` and `streetview.js` to see how the current Street View pano is created and whether its ID is already available or can be exposed cleanly.
+>
+> The ID is already returned by `/streetview/random-location` and passed into `viewer.moveTo(...)`; the cleanest fix is to expose that value through a shared frontend state variable (or a custom event), rather than trying to scrape it from the rendered viewer. I’m checking the Mapillary API details so I can distinguish the simplest reliable option from viewer-event alternatives.
+>
+> <details><summary>Searched the web</summary>
+>
+> Searched the web for `site:facebook.github.io/MapillaryJS viewer moveTo getImage event image id`
+>
+> </details>
+
+</details>
+
+Yes. You already receive the displayed Mapillary image ID here:
+
+```js
+.then((randomLocationImageId) => {
+  viewer.moveTo(randomLocationImageId);
+});
+```
+
+Store it in shared frontend state. Since regular `<script>` files share the global scope, define the variable outside the event listener in `streetview.js`:
+
+```js
+// streetview.js
+let currentImageId = null;
+
+document.addEventListener("DOMContentLoaded", async () => {
+  const streetviewContainer = document.querySelector("#streetview-container");
+
+  const tokenResponse = await fetch("/streetview/access-token");
+  const { accessToken } = await tokenResponse.json();
+
+  const viewer = new mapillary.Viewer({
+    accessToken,
+    container: streetviewContainer,
+  });
+
+  fetch("/streetview/random-location")
+    .then((res) => res.json())
+    .then((randomLocationImageId) => {
+      currentImageId = String(randomLocationImageId);
+
+      return viewer.moveTo(currentImageId);
+    })
+    .catch((error) => {
+      console.error("Unable to load Mapillary image", error);
+      streetviewContainer.textContent = "Unable to load streetview image";
+    });
+});
+```
+
+Then use that variable in `guess_map.js`:
+
+```js
+aiReviewButton.addEventListener("click", async () => {
+  if (!currentImageId) {
+    console.error("Street View image has not loaded yet.");
+    return;
+  }
+
+  const response = await fetch("/streetview/ai-review", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      imageId: currentImageId,
+    }),
+  });
+
+  const aiReview = await response.json();
+
+  if (!response.ok) {
+    throw new Error(aiReview.error || "AI review request failed");
+  }
+
+  console.log(aiReview.review);
+});
+```
+
+This works because `guess_map.js` and `streetview.js` are both regular scripts in the same page. The script order does not cause a problem because the click handler only reads `currentImageId` after the user clicks.
+
+A slightly safer alternative is to use `window.currentImageId` explicitly:
+
+```js
+window.currentImageId = String(randomLocationImageId);
+```
+
+and then:
+
+```js
+body: JSON.stringify({
+  imageId: window.currentImageId,
+});
+```
+
+The important detail is to keep the ID as a string, since large Mapillary IDs can lose precision if treated as JavaScript numbers.
+
+> question 1: What if I have two users playing the game separately on their browser at the same time? Will this still work, since each browser has its own running instance of the frontend code?
+>
+> question 2: Is this clean code? Can the user maliciously put bad imageIds in the request made to the backend?
+
+1. Yes. Each browser tab has its own JavaScript runtime and its own `currentImageId` variable. Two users—or two tabs—will not overwrite each other’s frontend state.
+
+The backend request is also independent because the ID is sent with each individual request:
+
+```js
+body: JSON.stringify({ imageId: currentImageId });
+```
+
+The main exception would be if you stored the image ID in a shared backend/global variable. Avoid doing that. Keep it in the browser or associate it with a user session.
+
+2. The frontend approach is clean enough, but the backend must treat `imageId` as untrusted input. A malicious user can manually send:
+
+```js
+fetch("/streetview/ai-review", {
+  method: "POST",
+  body: JSON.stringify({ imageId: "some-other-id" }),
+});
+```
+
+Your backend already does an important check:
+
+```js
+if (!/^\d+$/.test(imageId)) {
+  return res.status(400).json(...);
+}
+```
+
+That prevents malformed IDs, but it does not prove that the ID belongs to the image assigned to that user’s current round. If that matters, validate it server-side:
+
+- Store the selected image ID in the user’s session or database.
+- When `/random-location` returns an image, associate it with that session/round.
+- In `/ai-review`, compare the submitted ID against the stored ID.
+- Reject the request if they do not match.
+
+For example:
+
+```js
+if (String(req.session.imageId) !== imageId) {
+  return res.status(403).json({
+    error: "Image does not belong to the current round",
+  });
+}
+```
+
+Also consider rate limiting the AI-review endpoint, since users could repeatedly call it and consume your Gemini/Mapillary API quota.
+
+So: frontend state is isolated per user, but frontend state is never a security boundary. The backend should validate ownership, format, authorization, and request frequency.
