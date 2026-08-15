@@ -1,0 +1,9 @@
+<div #container class="mapillary-container"></div>
+
+@if (loading()) {
+  <div class="viewer-status">Loading street view ...</div>
+}
+
+@if (error()) {
+  <div class="viewer-status error" role="alert">{{ error() }}</div>
+}

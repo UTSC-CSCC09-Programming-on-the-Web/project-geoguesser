@@ -1,0 +1,74 @@
+.game-board {
+  width: 100%;
+  max-width: 1800px;
+  margin: 0 auto;
+}
+
+.round-heading {
+  margin-bottom: 1rem;
+}
+
+.round-heading h2 {
+  margin-bottom: 0.25rem;
+}
+
+.round-heading p {
+  margin: 0;
+  color: #64748b;
+}
+
+.game-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(360px, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.streetview-panel,
+.guess-panel {
+  min-width: 0;
+  height: min(62vh, 620px);
+  min-height: 420px;
+  padding: 1rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.75rem;
+  background: white;
+}
+
+.guess-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.guess-status {
+  flex: 0 0 auto;
+  min-height: 1.5rem;
+  margin: 0 0 0.75rem;
+  color: #334155;
+}
+
+.next-step-note {
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.loading-panel,
+.error-panel {
+  padding: 2rem;
+  text-align: center;
+}
+
+.error-panel {
+  color: #b91c1c;
+}
+
+@media (max-width: 900px) {
+  .game-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .streetview-panel,
+  .guess-panel {
+    height: 480px;
+  }
+}

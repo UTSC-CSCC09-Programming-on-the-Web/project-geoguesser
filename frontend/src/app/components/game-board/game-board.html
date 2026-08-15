@@ -1,0 +1,37 @@
+<section class="game-board">
+  @if (game.loading() && !game.round()) {
+    <div class="loading-panel">Starting game ...</div>
+  }
+
+  @if (game.error()) {
+    <div class="error-panel" role="alert">
+      {{ game.error() }}
+      <button type="button" (click)="retry()">Retry</button>
+    </div>
+  }
+
+  @if (game.round(); as currentRound) {
+    <div class="round-heading">
+      <h2>Round {{ currentRound.roundNumber }} of 3</h2>
+      <p>Choose a location on the map</p>
+    </div>
+
+    <div class="game-layout">
+      <section class="streetview-panel">
+        <app-mapillary-viewer [imageId]="currentRound.imageId" />
+      </section>
+
+      <section class="guess-panel">
+        <div class="guess-status">
+          @if (selectedGuess(); as guess) {
+            Guess selected: {{ guess.lat.toFixed(4) }}, {{ guess.lng.toFixed(4) }}
+          } @else {
+            No guess selected yet.
+          }
+        </div>
+
+        <app-guess-map [resetKey]="currentRound.roundId" (guessChange)="onGuessChange($event)" />
+      </section>
+    </div>
+  }
+</section>
