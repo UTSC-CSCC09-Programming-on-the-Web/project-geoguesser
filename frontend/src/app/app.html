@@ -1,0 +1,101 @@
+<div class="app-shell">
+  <header class="header">
+    <div class="header-content">
+      <h1 class="logo">🌍 GeoGuesser</h1>
+
+      <div class="header-controls">
+        <div class="round-stat">
+          <span class="stat-label">Round</span>
+          <span class="stat-value">-/3</span>
+        </div>
+
+        <div class="auth-controls">
+          <span class="auth-status">{{ auth.statusText() }}</span>
+
+          @if (!auth.user()) {
+            <button class="btn bth-secondary auth-btn" type="button" (click)="auth.login()">
+              Login with Google
+            </button>
+          } @else {
+            @if (!auth.canPlay()) {
+              <button
+                class="btn bth-secondary auth-btn"
+                type="button"
+                [disabled]="auth.loading()"
+                (click)="subscribe()"
+              >
+                Subscribe for AI
+              </button>
+            }
+
+            <button
+              class="btn bth-secondary auth-btn"
+              type="button"
+              [disabled]="auth.loading()"
+              (click)="logout()"
+            >
+              Logout
+            </button>
+          }
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="game-container">
+    @if (!auth.ready()) {
+      <section class="loading-panel">Checking authentication ...</section>
+    } @else {
+      <section class="game-stage" [class.locked]="!auth.canPlay()">
+        <div class="placeholder-card">
+          @if (auth.canPlay()) {
+            <h2>Game shell ready</h2>
+            <p>Authentication and subscription access are active.</p>
+          } @else {
+            <h2>Gamplay locked</h2>
+            <p>Sign in and activate your subscription to unlock the game</p>
+          }
+        </div>
+
+        @if (auth.error()) {
+          <p class="error-message" role="alert">
+            {{ auth.error() }}
+          </p>
+        }
+
+        @if (!auth.canPlay()) {
+          <section class="access-gate" aria-labelledby="access-gate-title">
+            <div class="access-gate-content">
+              <h2 id="access-gate-title">Login + active subscription required</h2>
+
+              <p>
+                @if (!auth.user()) {
+                  Sign in with Google to unlock gameplay
+                } @else {
+                  Complete checkout to unlock gameplay
+                }
+              </p>
+
+              @if (!auth.user()) {
+                <button class="btn btn-primary" type="button" (click)="auth.login()">
+                  Login with Google
+                </button>
+              } @else {
+                <button
+                  class="btn btn-primary"
+                  type="button"
+                  [disabled]="auth.loading()"
+                  (click)="subscribe()"
+                >
+                  Subscribe for AI
+                </button>
+              }
+            </div>
+          </section>
+        }
+      </section>
+    }
+  </main>
+
+  <footer class="footer">2026 GeoGuesser Replica</footer>
+</div>

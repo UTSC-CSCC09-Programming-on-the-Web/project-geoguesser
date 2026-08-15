@@ -55,6 +55,9 @@ async function loadStreetview(imageId) {
       window.streetviewViewer = new mapillary.Viewer({
         accessToken: tokenResult.accessToken,
         container: streetviewContainer,
+        component: {
+          cache: false,
+        },
       });
     }
 
