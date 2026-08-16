@@ -24,6 +24,7 @@ export class App implements OnInit {
 
   async logout(): Promise<void> {
     await this.auth.logout();
+    sessionStorage.removeItem('geoguesser.game-state');
     this.game.clear();
   }
 }
