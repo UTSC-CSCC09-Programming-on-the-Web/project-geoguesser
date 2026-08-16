@@ -3,9 +3,10 @@ import jwt from "jsonwebtoken";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import Stripe from "stripe";
+import { UniqueConstraintError } from "sequelize";
 import { sequelize } from "../database/datasource.js";
 import { Subscriptions, Users } from "../database/models/models.js";
-import { UniqueConstraintError } from "sequelize";
+import { registerRealtimeClient } from "../utility/realtime.js";
 
 const router = Router();
 
@@ -465,6 +466,16 @@ router.get(
   requireActiveSubscription,
   (req, res) => {
     return res.json({ secretData: "This is only for paying members." });
+  },
+);
+
+// real-time updates
+router.get(
+  "/api/realtime",
+  authenticateToken,
+  requireActiveSubscription,
+  (req, res) => {
+    registerRealtimeClient(req.user.userId, res);
   },
 );
 

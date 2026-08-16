@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { sequelize } from "../database/datasource.js";
 import { Op } from "sequelize";
+import { sequelize } from "../database/datasource.js";
 import { Locations, Games, Rounds } from "../database/models/models.js";
 import { calculateDistance } from "../utility/distance.js";
+import { broadcastToUser } from "../utility/realtime.js";
 
 export const gameRouter = Router();
 
@@ -47,6 +48,11 @@ gameRouter.get("/:gameId/score", async (req, res) => {
     const totalDistance = rounds.reduce((accumulator, round) => {
       return accumulator + round.distance;
     }, 0);
+
+    broadcastToUser(req.user.userId, "game.completed", {
+      gameId,
+      totalDistance,
+    });
 
     return res.json({ totalDistance });
   } catch (error) {
@@ -143,6 +149,11 @@ gameRouter.post("/start", async (req, res) => {
           roundNumber: firstRound.roundNumber,
         };
       }
+    });
+
+    broadcastToUser(userId, "game.state", {
+      gameId: result.gameId,
+      round: result,
     });
 
     // return result from transaction above
@@ -298,6 +309,12 @@ gameRouter.post("/:gameId/rounds/:roundId/guess", async (req, res) => {
       };
     });
 
+    broadcastToUser(user.userId, "game.guess-submitted", {
+      gameId,
+      roundId,
+      result,
+    });
+
     // result is {distance, guessLocation, actualLocation, newRoundData}
     return res.json(result);
   } catch (error) {
@@ -308,6 +325,95 @@ gameRouter.post("/:gameId/rounds/:roundId/guess", async (req, res) => {
     const message = status === 409 ? error.message : "Failed to log guess";
 
     return res.status(status).json({ error: message });
+  }
+});
+
+gameRouter.post("/:gameId/rounds/:roundId/advance", async (req, res) => {
+  const gameId = Number(req.params.gameId);
+  const roundId = Number(req.params.roundId);
+  const userId = req.user.userId;
+
+  if (!Number.isInteger(gameId) || !Number.isInteger(roundId)) {
+    return res.status(400).json({
+      error: "Invalid gameId or roundId.",
+    });
+  }
+
+  try {
+    const completedRound = await Rounds.findOne({
+      where: {
+        gameId,
+        roundId,
+      },
+      include: [
+        {
+          model: Games,
+          as: "game",
+          attributes: ["gameId", "userId", "status"],
+          where: {
+            gameId,
+            userId,
+            status: "in_progress",
+          },
+        },
+      ],
+    });
+
+    if (!completedRound) {
+      return res.status(404).json({
+        error: "Active round was not found.",
+      });
+    }
+
+    const roundWasCompleted =
+      completedRound.guessLat !== null &&
+      completedRound.guessLng !== null &&
+      completedRound.distance !== null;
+
+    if (!roundWasCompleted) {
+      return res.status(409).json({
+        error: "The current round has not been completed yet.",
+      });
+    }
+
+    if (completedRound.roundNumber >= 3) {
+      return res.status(409).json({
+        error: "There is no next round.",
+      });
+    }
+
+    const nextRound = await Rounds.findOne({
+      where: {
+        gameId,
+        roundNumber: completedRound.roundNumber + 1,
+      },
+    });
+
+    if (!nextRound) {
+      return res.status(404).json({
+        error: "The next round was not found.",
+      });
+    }
+
+    const roundData = {
+      gameId: nextRound.gameId,
+      imageId: nextRound.imageId,
+      roundId: nextRound.roundId,
+      roundNumber: nextRound.roundNumber,
+    };
+
+    broadcastToUser(userId, "game.round-advanced", {
+      gameId,
+      round: roundData,
+    });
+
+    return res.json(roundData);
+  } catch (error) {
+    console.error("Unable to advance round:", error);
+
+    return res.status(500).json({
+      error: "Failed to advance round.",
+    });
   }
 });
 

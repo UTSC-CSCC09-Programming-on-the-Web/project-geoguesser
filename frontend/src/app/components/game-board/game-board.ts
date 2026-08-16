@@ -1,10 +1,11 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
-
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { AiMode, Coordinates, GuessSubmissionResponse, RoundState } from '../../models/game.models';
 import { GameService } from '../../services/game.service';
 import { GuessMapComponent } from '../guess-map/guess-map';
 import { MapillaryViewerComponent } from '../mapillary-viewer/mapillary-viewer';
 import { ResultMapComponent } from '../result-map/result-map';
+import { GameRealtimeEvent, RealtimeService } from '../../services/realtime.service';
 
 type GamePhase = 'playing' | 'result' | 'complete';
 
@@ -41,7 +42,18 @@ export class GameBoardComponent implements OnInit {
   protected readonly reviewText = signal<string | null>(null);
   protected readonly hintUsed = signal(false);
 
+  protected readonly realtime = inject(RealtimeService);
+  protected readonly liveUpdate = signal<string | null>(null);
+
+  constructor() {
+    this.realtime.events
+      .pipe(takeUntilDestroyed())
+      .subscribe((event) => this.handleRealtimeEvent(event));
+  }
+
   ngOnInit(): void {
+    this.realtime.connect();
+
     if (this.restoreSavedState()) {
       return;
     }
@@ -108,16 +120,29 @@ export class GameBoardComponent implements OnInit {
 
   protected async continueGame(): Promise<void> {
     const response = this.result();
+    const currentRound = this.game.round();
 
-    if (!response || this.actionLoading()) {
+    if (!response || !currentRound || this.actionLoading()) {
       return;
     }
 
     if (response.newRoundData) {
-      this.resetRoundUi();
-      this.game.setRound(response.newRoundData);
-      this.phase.set('playing');
-      this.clearSavedState();
+      this.actionLoading.set(true);
+      this.actionError.set(null);
+
+      try {
+        const nextRound = await this.game.advanceRound(currentRound.gameId, currentRound.roundId);
+
+        this.resetRoundUi();
+        this.game.setRound(nextRound);
+        this.phase.set('playing');
+        this.clearSavedState();
+      } catch (error: unknown) {
+        this.actionError.set(this.getErrorMessage(error));
+      } finally {
+        this.actionLoading.set(false);
+      }
+
       return;
     }
 
@@ -236,5 +261,69 @@ export class GameBoardComponent implements OnInit {
 
   private clearSavedState(): void {
     sessionStorage.removeItem(this.storageKey);
+  }
+
+  private handleRealtimeEvent(event: GameRealtimeEvent): void {
+    const currentRound = this.game.round();
+
+    if (event.type === 'game.state') {
+      if (currentRound && currentRound.gameId !== event.payload.gameId) {
+        return;
+      }
+
+      this.liveUpdate.set('Game state updated live.');
+
+      if (this.phase() === 'playing' && !this.actionLoading()) {
+        this.game.setRound(event.payload.round);
+      }
+
+      return;
+    }
+
+    if (!currentRound || currentRound.gameId !== event.payload.gameId) {
+      return;
+    }
+
+    if (event.type === 'game.guess-submitted') {
+      this.liveUpdate.set('This game was updated live in another tab or device.');
+
+      if (this.phase() !== 'playing' || this.actionLoading()) {
+        return;
+      }
+
+      this.result.set(event.payload.result);
+      this.selectedGuess.set(null);
+      this.phase.set('result');
+      this.saveState();
+
+      return;
+    }
+
+    if (event.type === 'game.round-advanced') {
+      this.liveUpdate.set('Next round opened live.');
+
+      if (this.phase() !== 'result' || this.actionLoading()) {
+        return;
+      }
+
+      this.resetRoundUi();
+      this.game.setRound(event.payload.round);
+      this.phase.set('playing');
+      this.clearSavedState();
+
+      return;
+    }
+
+    if (event.type === 'game.completed') {
+      this.liveUpdate.set('Final score updated live.');
+
+      if (this.phase() !== 'result' || this.actionLoading()) {
+        return;
+      }
+
+      this.finalScore.set(event.payload.totalDistance);
+      this.phase.set('complete');
+      this.saveState();
+    }
   }
 }

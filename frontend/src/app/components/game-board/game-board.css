@@ -176,6 +176,18 @@
   font-weight: 700;
 }
 
+.live-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  color: #475569;
+  font-size: 0.85rem;
+}
+
 @media (max-width: 900px) {
   .game-layout {
     grid-template-columns: 1fr;

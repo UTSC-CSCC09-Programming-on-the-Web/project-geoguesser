@@ -1,4 +1,16 @@
 <section class="game-board">
+  <div class="live-status" role="status" aria-live="polite">
+    @if (realtime.connected()) {
+      <span>Live updates connected</span>
+    } @else {
+      <span>Live updates reconnecting ...</span>
+    }
+
+    @if (liveUpdate(); as message) {
+      <span>{{ message }}</span>
+    }
+  </div>
+
   @if (game.loading() && !game.round()) {
     <div class="loading-panel">Starting game ...</div>
   }

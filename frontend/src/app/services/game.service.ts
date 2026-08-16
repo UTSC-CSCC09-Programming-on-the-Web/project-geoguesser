@@ -152,4 +152,25 @@ export class GameService {
 
     return 'Request failed';
   }
+
+  async advanceRound(gameId: number, roundId: number): Promise<RoundState> {
+    try {
+      const response = await firstValueFrom(
+        this.http.post<RoundState>(`/games/${gameId}/rounds/${roundId}/advance`, {}),
+      );
+
+      if (
+        response.gameId === undefined ||
+        response.roundId === undefined ||
+        response.roundNumber === undefined ||
+        !response.imageId
+      ) {
+        throw new Error('The server returned incomplete next-round data');
+      }
+
+      return response;
+    } catch (error: unknown) {
+      throw new Error(this.getErrorMessage(error));
+    }
+  }
 }
