@@ -21,11 +21,26 @@ gameRouter.get("/:gameId/score", async (req, res) => {
     const rounds = await Rounds.findAll({
       where: { gameId },
       attributes: ["distance"],
+      include: [
+        {
+          model: Games,
+          as: "game",
+          attributes: [],
+          where: {
+            gameId,
+            userId: req.user.userId,
+            status: "completed",
+          },
+        },
+      ],
     });
 
-    if (rounds.length !== 3) {
+    if (
+      rounds.length !== 3 ||
+      rounds.some((round) => !Number.isFinite(Number(round.distance)))
+    ) {
       return res.status(404).json({
-        error: `Did not find all three rounds corresponding to game with gameId: ${gameId}`,
+        error: `Did not find a completed three-round game for gameId: ${gameId}`,
       });
     }
 
@@ -191,9 +206,12 @@ gameRouter.post("/:gameId/rounds/:roundId/guess", async (req, res) => {
         round.guessLng !== null ||
         round.distance !== null
       ) {
-        return res
-          .status(409)
-          .json({ error: "That round has already been guessed" });
+        const duplicateGuessError = new Error(
+          "That round has already been guessed",
+        );
+
+        duplicateGuessError.status = 409;
+        throw duplicateGuessError;
       }
       // #endregion
 
@@ -284,7 +302,12 @@ gameRouter.post("/:gameId/rounds/:roundId/guess", async (req, res) => {
     return res.json(result);
   } catch (error) {
     console.log(error);
-    return res.status(500).json({ error: "Failed to log guess" });
+
+    const status = error.status === 409 ? 409 : 500;
+
+    const message = status === 409 ? error.message : "Failed to log guess";
+
+    return res.status(status).json({ error: message });
   }
 });
 

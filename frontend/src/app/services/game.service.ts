@@ -2,7 +2,14 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { computed, inject, Injectable, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
-import { RoundState } from '../models/game.models';
+import {
+  AiMode,
+  AiResponse,
+  Coordinates,
+  GuessSubmissionResponse,
+  RoundState,
+  ScoreResponse,
+} from '../models/game.models';
 
 @Injectable({
   providedIn: 'root',
@@ -25,6 +32,14 @@ export class GameService {
     this.loading.set(false);
   }
 
+  setRound(round: RoundState): void {
+    this.round.set({
+      ...round,
+      imageId: String(round.imageId),
+    });
+    this.error.set(null);
+  }
+
   async startGame(): Promise<void> {
     if (this.loading()) {
       return;
@@ -45,14 +60,70 @@ export class GameService {
         throw new Error('The server returned incomplete round data');
       }
 
-      this.round.set({
-        ...response,
-        imageId: String(response.imageId),
-      });
+      this.setRound(response);
     } catch (error: unknown) {
       this.error.set(this.getErrorMessage(error));
     } finally {
       this.loading.set(false);
+    }
+  }
+
+  async submitGuess(round: RoundState, guess: Coordinates): Promise<GuessSubmissionResponse> {
+    try {
+      const response = await firstValueFrom(
+        this.http.post<GuessSubmissionResponse>(
+          `/games/${round.gameId}/rounds/${round.roundId}/guess`,
+          {
+            guessLat: guess.lat,
+            guessLng: guess.lng,
+          },
+        ),
+      );
+
+      if (
+        !Number.isFinite(response.distance) ||
+        !response.guessLocation ||
+        !response.actualLocation
+      ) {
+        throw new Error('The server returned incomplete guess results');
+      }
+
+      return response;
+    } catch (error: unknown) {
+      throw new Error(this.getErrorMessage(error));
+    }
+  }
+
+  async requestAi(imageId: string, mode: AiMode): Promise<AiResponse> {
+    try {
+      const response = await firstValueFrom(
+        this.http.post<AiResponse>('/streetview/ai-review', {
+          imageId: String(imageId),
+          mode,
+        }),
+      );
+
+      if (!response.text) {
+        throw new Error('The AI returned an empty response');
+      }
+
+      return response;
+    } catch (error: unknown) {
+      throw new Error(this.getErrorMessage(error));
+    }
+  }
+
+  async getScore(gameId: number): Promise<number> {
+    try {
+      const response = await firstValueFrom(this.http.get<ScoreResponse>(`/games/${gameId}/score`));
+
+      if (!Number.isFinite(response.totalDistance)) {
+        throw new Error('The server returned an invalid final score');
+      }
+
+      return response.totalDistance;
+    } catch (error: unknown) {
+      throw new Error(this.getErrorMessage(error));
     }
   }
 

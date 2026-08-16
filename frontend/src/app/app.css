@@ -68,7 +68,7 @@
 .game-container {
   flex: 1;
   position: relative;
-  padding: 1rem;
+  padding: 0.5rem 1rem;
   display: flex;
   align-items: stretch;
 }
@@ -144,12 +144,12 @@
 }
 
 .footer {
-  padding: 1.25rem;
-  border-top: 2px solid var(--border-color);
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--border-color);
   background: var(--surface);
   color: var(--text-secondary);
   text-align: center;
-  font-size: 0.875rem;
+  font-size: 0.75rem;
 }
 
 .btn {

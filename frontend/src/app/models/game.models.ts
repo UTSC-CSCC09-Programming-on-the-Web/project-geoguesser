@@ -10,3 +10,24 @@ export interface RoundState {
   roundId: number;
   roundNumber: number;
 }
+
+export interface ActualLocation extends Coordinates {
+  location: string;
+}
+
+export interface GuessSubmissionResponse {
+  distance: number;
+  guessLocation: Coordinates;
+  actualLocation: ActualLocation;
+  newRoundData?: RoundState;
+}
+
+export interface ScoreResponse {
+  totalDistance: number;
+}
+
+export type AiMode = 'hint' | 'review';
+
+export interface AiResponse {
+  text: string;
+}
