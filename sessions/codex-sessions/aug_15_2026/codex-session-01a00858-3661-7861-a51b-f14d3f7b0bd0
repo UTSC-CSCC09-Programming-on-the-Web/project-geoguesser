@@ -1,0 +1,621 @@
+# Complete Angular frontend migration
+
+> Ok, so I'm trying to finish migrating my frontend and codebase to use angular now.  Here was the outline we generated previously (but I am open to modifying it if necessary)
+>
+> Document and verify the existing API response shapes.
+> Scaffold the Angular project.
+> Add development proxying to Express.
+> Build the Angular shell and header.
+> Implement authentication and subscription state.
+> Implement the access gate.
+> Implement game start and round state.
+> Integrate the Mapillary Street View component.
+> Integrate the Leaflet guessing map.
+> Implement guess submission and round results.
+> Implement AI hints and AI reviews.
+> Implement final score and “Play Again.” (completed up til here)
+> Test refreshes, errors, authentication, and all three rounds.
+> Build Angular for production.
+> Serve the Angular build through the existing deployment.
+> Remove the old static frontend only after Angular has feature parity.
+>
+> Can we implement the rest? I want to have a finished product now, but am not going to deploy yet.  I will do that as a separate step. Here, I would like to complete the remainder of the project, so the entire project is in angular now.
+>
+> Please do not modify the code base.  Leave any code and clear instructions and I will modify it myself.
+>
+> If you feel the code needs additional changes, you are welcome to add them to fix bugs and possible issues.
+
+<details><summary>2 previous messages</summary>
+
+> I’ll treat this as a read-only completion audit: first I’ll compare the current Angular migration against the remaining checklist, then I’ll identify any bugs or missing parity work and give you exact file-level edits and verification commands. I won’t change the repository.
+>
+> The prior notes confirm the migration was only source-inspected, not compiled or run, so I’m keeping “implemented” and “verified” separate. I’m now checking the actual checkout because the remaining work may already be partly present or may differ from the earlier outline.
+</details>
+
+Yes. The checkout is already ahead of the outline: Angular currently includes gameplay, Mapillary, Leaflet, guesses/results, AI hints/reviews, final scoring, and Play Again.
+
+I did not modify any files. Current implementation is in:
+
+- [game-board.ts](/home/spambuddy/cscc09/project-geoguesser/frontend/src/app/components/game-board/game-board.ts)
+- [game.service.ts](/home/spambuddy/cscc09/project-geoguesser/frontend/src/app/services/game.service.ts)
+- [mapillary-viewer.ts](/home/spambuddy/cscc09/project-geoguesser/frontend/src/app/components/mapillary-viewer/mapillary-viewer.ts)
+- [guess-map.ts](/home/spambuddy/cscc09/project-geoguesser/frontend/src/app/components/guess-map/guess-map.ts)
+- [result-map.ts](/home/spambuddy/cscc09/project-geoguesser/frontend/src/app/components/result-map/result-map.ts)
+
+The main remaining blocker is refresh recovery after submitting a guess. `GameBoardComponent` always calls `/games/start` on initialization, but the backend rejects an in-progress game whose current round was already guessed. See [gameRouter.js](/home/spambuddy/cscc09/project-geoguesser/routers/gameRouter.js:62) and [game-board.ts](/home/spambuddy/cscc09/project-geoguesser/frontend/src/app/components/game-board/game-board.ts:35).
+
+Recommended manual fix: persist the current Angular game phase in `sessionStorage`.
+
+Add a saved-state interface and storage key to `game-board.ts`:
+
+```ts
+interface SavedGameState {
+  round: RoundState | null;
+  phase: GamePhase;
+  result: GuessSubmissionResponse | null;
+  finalScore: number | null;
+}
+
+private readonly storageKey = 'geoguesser.game-state';
+
+private saveState(): void {
+  sessionStorage.setItem(
+    this.storageKey,
+    JSON.stringify({
+      round: this.game.round(),
+      phase: this.phase(),
+      result: this.result(),
+      finalScore: this.finalScore(),
+    } satisfies SavedGameState),
+  );
+}
+```
+
+In `ngOnInit()`, restore this state before calling `startGame()`. Call `saveState()` after:
+
+- a guess changes the phase to `result`;
+- loading the next round;
+- loading the final score;
+- successfully starting Play Again.
+
+Clear the key when starting Play Again and when logging out. This makes refreshes during the result screen and final-score screen recover correctly.
+
+Then run:
+
+```bash
+cd /home/spambuddy/cscc09/project-geoguesser/frontend
+npm ci
+npm test -- --watch=false
+npm run build
+```
+
+The Angular proxy and production build configuration are already present in [angular.json](/home/spambuddy/cscc09/project-geoguesser/frontend/angular.json:57).
+
+Deployment should remain separate. Before deleting the old `static/` frontend, update [app.js](/home/spambuddy/cscc09/project-geoguesser/app.js:27) to serve `frontend/dist/frontend/browser`, and later update [Dockerfile](/home/spambuddy/cscc09/project-geoguesser/Dockerfile:1) to build and copy the Angular application. Do not change Caddy yet.
+
+> what are the exact changes I have to do to game-board.ts, can you be clear?
+
+<details><summary>1 previous message</summary>
+
+> I’ll walk through the existing `game-board.ts` and give you a precise edit checklist, including the exact import, fields, methods, and call sites. I won’t modify the file.
+</details>
+
+Yes. Make these exact changes in:
+
+[game-board.ts](/home/spambuddy/cscc09/project-geoguesser/frontend/src/app/components/game-board/game-board.ts)
+
+This adds recovery for refreshes on the result and final-score screens.
+
+### 1. Update the import
+
+Replace:
+
+```ts
+import { AiMode, Coordinates, GuessSubmissionResponse } from '../../models/game.models';
+```
+
+with:
+
+```ts
+import {
+  AiMode,
+  Coordinates,
+  GuessSubmissionResponse,
+  RoundState,
+} from '../../models/game.models';
+```
+
+### 2. Add the saved-state interface
+
+Immediately below:
+
+```ts
+type GamePhase = 'playing' | 'result' | 'complete';
+```
+
+add:
+
+```ts
+interface SavedGameState {
+  round: RoundState;
+  phase: 'result' | 'complete';
+  result: GuessSubmissionResponse | null;
+  finalScore: number | null;
+}
+```
+
+### 3. Add a storage key
+
+Inside `GameBoardComponent`, immediately after the class declaration, add:
+
+```ts
+private readonly storageKey = 'geoguesser.game-state';
+```
+
+### 4. Replace `ngOnInit`
+
+Replace the current method:
+
+```ts
+ngOnInit(): void {
+  void this.game.startGame();
+}
+```
+
+with:
+
+```ts
+ngOnInit(): void {
+  if (this.restoreSavedState()) {
+    return;
+  }
+
+  void this.game.startGame();
+}
+```
+
+### 5. Save the result after submitting a guess
+
+In `submitGuess()`, after:
+
+```ts
+this.selectedGuess.set(null);
+```
+
+add:
+
+```ts
+this.saveState();
+```
+
+That section should become:
+
+```ts
+this.result.set(response);
+this.phase.set('result');
+this.selectedGuess.set(null);
+this.saveState();
+```
+
+### 6. Clear saved state when moving to the next round
+
+In `continueGame()`, change:
+
+```ts
+this.phase.set('playing');
+return;
+```
+
+to:
+
+```ts
+this.phase.set('playing');
+this.clearSavedState();
+return;
+```
+
+### 7. Clear saved state when playing again
+
+In `playAgain()`, add this before `this.game.clear()`:
+
+```ts
+this.clearSavedState();
+```
+
+The beginning should be:
+
+```ts
+this.actionLoading.set(true);
+this.actionError.set(null);
+this.finalScore.set(null);
+this.clearSavedState();
+this.game.clear();
+this.resetRoundUi();
+```
+
+### 8. Clear saved state when retrying
+
+Replace `retry()` with:
+
+```ts
+protected retry(): void {
+  this.clearSavedState();
+  this.game.clear();
+  this.resetRoundUi();
+  this.phase.set('playing');
+  void this.game.startGame();
+}
+```
+
+### 9. Save the final score
+
+In `showFinalScore()`, after:
+
+```ts
+this.phase.set('complete');
+```
+
+add:
+
+```ts
+this.saveState();
+```
+
+That section should become:
+
+```ts
+this.finalScore.set(score);
+this.phase.set('complete');
+this.saveState();
+```
+
+### 10. Add these helper methods
+
+Add the following methods immediately before `resetRoundUi()`:
+
+```ts
+private restoreSavedState(): boolean {
+  const rawState = sessionStorage.getItem(this.storageKey);
+
+  if (!rawState) {
+    return false;
+  }
+
+  try {
+    const savedState = JSON.parse(rawState) as SavedGameState;
+
+    if (
+      !savedState.round ||
+      (savedState.phase !== 'result' && savedState.phase !== 'complete')
+    ) {
+      this.clearSavedState();
+      return false;
+    }
+
+    this.game.setRound(savedState.round);
+    this.phase.set(savedState.phase);
+    this.result.set(savedState.result);
+    this.finalScore.set(savedState.finalScore);
+
+    return true;
+  } catch {
+    this.clearSavedState();
+    return false;
+  }
+}
+
+private saveState(): void {
+  const round = this.game.round();
+
+  if (!round) {
+    return;
+  }
+
+  const savedState: SavedGameState = {
+    round,
+    phase: this.phase() as 'result' | 'complete',
+    result: this.result(),
+    finalScore: this.finalScore(),
+  };
+
+  sessionStorage.setItem(this.storageKey, JSON.stringify(savedState));
+}
+
+private clearSavedState(): void {
+  sessionStorage.removeItem(this.storageKey);
+}
+```
+
+The important behavior is:
+
+- Refresh before submitting: `/games/start` resumes the current round.
+- Refresh after submitting: Angular restores the saved result instead of calling `/games/start`.
+- Refresh on the final-score screen: Angular restores the final score.
+- Play Again: saved state is removed and a new game starts.
+
+Also add this one line to `app.ts` inside `logout()` so another user cannot inherit the previous user’s saved game:
+
+```ts
+sessionStorage.removeItem('geoguesser.game-state');
+```
+
+> how do i update app.js to serve frontend/dist/frontend/browser?
+
+In [app.js](/home/spambuddy/cscc09/project-geoguesser/app.js), make these changes.
+
+### 1. Add path imports
+
+Add these with the other imports:
+
+```js
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+```
+
+### 2. Define the Angular build directory
+
+Add this before `const app = express();`:
+
+```js
+const currentFile = fileURLToPath(import.meta.url);
+const currentDirectory = path.dirname(currentFile);
+
+const frontendDist = path.join(
+  currentDirectory,
+  "frontend",
+  "dist",
+  "frontend",
+  "browser",
+);
+```
+
+### 3. Replace the old static frontend
+
+Replace:
+
+```js
+app.use(express.static("static"));
+```
+
+with:
+
+```js
+app.use(express.static(frontendDist));
+```
+
+### 4. Add Angular’s fallback route
+
+Add this after the `/games` route:
+
+```js
+app.use((req, res, next) => {
+  const backendRoute = /^(\/api|\/auth|\/games|\/streetview)(\/|$)/.test(
+    req.path,
+  );
+
+  if (
+    req.method !== "GET" ||
+    backendRoute ||
+    !req.accepts("html")
+  ) {
+    return next();
+  }
+
+  return res.sendFile(path.join(frontendDist, "index.html"));
+});
+```
+
+This makes `/` serve Angular’s `index.html`, while API and authentication requests still reach Express.
+
+### 5. Build and test locally
+
+```bash
+cd /home/spambuddy/cscc09/project-geoguesser/frontend
+npm run build
+
+cd ..
+FRONTEND_URL=http://localhost:3000 node bootstrap.js
+```
+
+Open:
+
+```text
+http://localhost:3000/
+```
+
+For same-process production testing, set:
+
+```env
+FRONTEND_URL=http://localhost:3000
+```
+
+When using `ng serve` on port `4200`, keep:
+
+```env
+FRONTEND_URL=http://localhost:4200
+```
+
+The existing Dockerfile will also need a later frontend build stage before deployment; this `app.js` change alone assumes `frontend/dist/frontend/browser` already exists.
+
+> When I ran `npm run build` in the frontend folder, I got the following errors:
+>
+> npm run build
+>
+> > frontend@0.0.0 build
+> > ng build
+>
+> Initial chunk files | Names         | Raw size | Estimated transfer size
+> main-TFXPY5TP.js    | main          |  1.48 MB |               328.71 kB
+> styles-RKR52UWD.css | styles        | 95.67 kB |                22.22 kB
+>
+>                     | Initial total |  1.57 MB |               350.93 kB
+>
+> Application bundle generation failed. [11.480 seconds] - 2026-08-16T03:26:26.165Z
+>
+> ▲ [WARNING] bundle initial exceeded maximum budget. Budget 500.00 kB was not met by 1.07 MB with a total of 1.57 MB.
+>
+> ▲ [WARNING] Module 'leaflet' used by 'src/app/components/guess-map/guess-map.ts' is not ESM
+>
+>   CommonJS or AMD dependencies can cause optimization bailouts.
+>   For more information see: https://angular.dev/tools/cli/build#configuring-commonjs-dependencies
+>
+> ✘ [ERROR] bundle initial exceeded maximum budget. Budget 1.00 MB was not met by 571.18 kB with a total of 1.57 MB.
+
+<details><summary>2 previous messages</summary>
+
+> This is a build-budget failure, not a TypeScript or application logic failure. I’ll verify the Angular configuration and the current official budget/CommonJS settings, then give you the smallest manual edit that allows this build to complete while keeping the warnings understandable.
+>
+> <details><summary>Searched the web</summary>
+>
+> Searched the web for `site:angular.dev/tools/cli build configuring CommonJS dependencies budgets Angular application builder`
+>
+> </details>
+</details>
+
+This build failed because the production budget is too small for Leaflet and Mapillary. Your application compiled successfully; Angular stopped because the initial bundle is `1.57 MB`, while the error limit is `1 MB`.
+
+Angular’s `initial` budget measures the JavaScript/CSS needed to start the application. The CommonJS setting only suppresses the Leaflet warning; it does not reduce the bundle size. [Angular build configuration](https://angular.dev/tools/cli/build)
+
+Edit:
+
+`frontend/angular.json`
+
+### 1. Allow Leaflet’s CommonJS warning
+
+Inside:
+
+```json
+"projects": {
+  "frontend": {
+    "architect": {
+      "build": {
+        "options": {
+```
+
+add:
+
+```json
+"allowedCommonJsDependencies": [
+  "leaflet"
+],
+```
+
+For example:
+
+```json
+"options": {
+  "browser": "src/main.ts",
+  "tsConfig": "tsconfig.app.json",
+  "allowedCommonJsDependencies": [
+    "leaflet"
+  ],
+  "assets": [
+```
+
+### 2. Increase the production initial budget
+
+Find:
+
+```json
+"budgets": [
+  {
+    "type": "initial",
+    "maximumWarning": "500kB",
+    "maximumError": "1MB"
+  },
+```
+
+Change it to:
+
+```json
+"budgets": [
+  {
+    "type": "initial",
+    "maximumWarning": "2mb",
+    "maximumError": "3mb"
+  },
+```
+
+Leave the `anyComponentStyle` budget unchanged.
+
+Then run:
+
+```bash
+cd /home/spambuddy/cscc09/project-geoguesser/frontend
+npm run build
+```
+
+You should then get a successful build. The bundle is currently about `1.57 MB` raw and `350 kB` estimated transfer size, so this budget is reasonable for the current Mapillary/Leaflet feature set.
+
+This is the immediate fix. Later, if you want to optimize loading speed, lazy-load the game component so Leaflet and Mapillary are not included in the initial application bundle.
+
+> Ok to test my application, I'm logging into my postgresql database and want to completely delete all entries in the Users and Subscriptions table.  What are the sql commands to do this?
+
+This is destructive and may also delete related `Games` and `Rounds` through foreign-key cascades.
+
+For a complete test reset:
+
+```sql
+BEGIN;
+
+TRUNCATE TABLE
+  "Subscriptions",
+  "Users"
+RESTART IDENTITY CASCADE;
+
+COMMIT;
+```
+
+Verify:
+
+```sql
+SELECT COUNT(*) FROM "Users";
+SELECT COUNT(*) FROM "Subscriptions";
+```
+
+Both should return `0`.
+
+`RESTART IDENTITY` resets auto-increment IDs. `CASCADE` may also remove dependent game and round records.
+
+> so does this completely reset the tables? What do you mean by a "test reset"
+
+Yes, it resets the data, but not the table structure.
+
+The command:
+
+```sql
+TRUNCATE TABLE
+  "Subscriptions",
+  "Users"
+RESTART IDENTITY CASCADE;
+```
+
+does the following:
+
+- Deletes every row from `Users`.
+- Deletes every row from `Subscriptions`.
+- Resets auto-increment IDs back to their starting values.
+- May also delete related `Games` and `Rounds` records because of foreign-key relationships.
+- Preserves the tables, columns, indexes, constraints, and schema.
+
+By “test reset,” I mean returning the application to a fresh-user state so you can test registration, login, subscription creation, and gameplay from the beginning.
+
+You can inspect before committing:
+
+```sql
+BEGIN;
+
+TRUNCATE TABLE
+  "Subscriptions",
+  "Users"
+RESTART IDENTITY CASCADE;
+
+SELECT COUNT(*) FROM "Users";
+SELECT COUNT(*) FROM "Subscriptions";
+
+-- Use ROLLBACK if you changed your mind:
+-- ROLLBACK;
+
+-- Use COMMIT when satisfied:
+COMMIT;
+```

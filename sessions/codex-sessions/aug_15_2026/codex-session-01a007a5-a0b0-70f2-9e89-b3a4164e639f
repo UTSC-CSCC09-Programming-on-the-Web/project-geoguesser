@@ -1,0 +1,1402 @@
+# Implement Angular game flow
+
+> I am moving onto the next part of migrating my frontend to Angular.  Here were the steps to progress through again:
+>
+> Document and verify the existing API response shapes.
+> Scaffold the Angular project.
+> Add development proxying to Express.
+> Build the Angular shell and header.
+> Implement authentication and subscription state.
+> Implement the access gate.
+> Implement game start and round state.
+> Integrate the Mapillary Street View component.
+> Integrate the Leaflet guessing map. (completed until here)
+> Implement guess submission and round results.
+> Implement AI hints and AI reviews.
+> Implement final score and “Play Again.”
+> Test refreshes, errors, authentication, and all three rounds.
+> Build Angular for production.
+> Serve the Angular build through the existing deployment.
+> Remove the old static frontend only after Angular has feature parity.
+>
+> I want to implement steps 10 - 12: Implement guess submission and round results, Implement AI hints and AI reviews, Implement final score and “Play Again.”
+>
+> Please do not modify the codebase. Leave your code here so I can manually change the code myself.  Leave clear and direct instructions on how to do so.
+>
+> If you feel the game needs improvements / bug fixes, you are welcome to include those as well.
+
+<details><summary>2 previous messages</summary>
+
+> I’ll inspect the current Angular game flow and its API contracts, then give you a manual, copyable implementation guide for steps 10–12. I’ll keep this strictly read-only and call out any fixes separately from the required migration work.
+>
+> The first broad parallel read hit a Windows/WSL path helper error before reading any files. I’m narrowing the inspection to focused searches, which is also safer for preserving the existing checkout and avoids treating that tooling failure as an application failure.
+</details>
+
+I inspected the current checkout read-only. Steps 10–12 can be completed without changing the Express API. The existing API already provides guess submission, AI hint/review, and final score endpoints.
+
+Current relevant files:
+
+- [game.models.ts](./frontend/src/app/models/game.models.ts)
+- [game.service.ts](./frontend/src/app/services/game.service.ts)
+- [game-board.ts](./frontend/src/app/components/game-board/game-board.ts)
+- [game-board.html](./frontend/src/app/components/game-board/game-board.html)
+- [gameRouter.js](./routers/gameRouter.js)
+- [streetviewRouter.js](./routers/streetviewRouter.js)
+
+## API shapes
+
+Guess submission:
+
+```http
+POST /games/:gameId/rounds/:roundId/guess
+Content-Type: application/json
+```
+
+```json
+{
+  "guessLat": 43.65,
+  "guessLng": -79.38
+}
+```
+
+Response:
+
+```json
+{
+  "distance": 12.34,
+  "guessLocation": {
+    "lat": 43.65,
+    "lng": -79.38
+  },
+  "actualLocation": {
+    "lat": 43.66,
+    "lng": -79.40,
+    "location": "Toronto, Canada"
+  },
+  "newRoundData": {
+    "gameId": 5,
+    "imageId": "123456789",
+    "roundId": 22,
+    "roundNumber": 2
+  }
+}
+```
+
+`newRoundData` is omitted after round three.
+
+AI hint/review:
+
+```http
+POST /streetview/ai-review
+```
+
+```json
+{
+  "imageId": "123456789",
+  "mode": "hint"
+}
+```
+
+or:
+
+```json
+{
+  "imageId": "123456789",
+  "mode": "review"
+}
+```
+
+Response:
+
+```json
+{
+  "text": "The road markings and vegetation suggest..."
+}
+```
+
+Final score:
+
+```http
+GET /games/:gameId/score
+```
+
+```json
+{
+  "totalDistance": 842.7
+}
+```
+
+## 1. Extend the game models
+
+Replace [game.models.ts](./frontend/src/app/models/game.models.ts) with:
+
+```ts
+export interface Coordinates {
+  lat: number;
+  lng: number;
+}
+
+export interface RoundState {
+  gameId: number;
+  imageId: string;
+  roundId: number;
+  roundNumber: number;
+}
+
+export interface ActualLocation extends Coordinates {
+  location: string;
+}
+
+export interface GuessSubmissionResponse {
+  distance: number;
+  guessLocation: Coordinates;
+  actualLocation: ActualLocation;
+  newRoundData?: RoundState;
+}
+
+export interface ScoreResponse {
+  totalDistance: number;
+}
+
+export type AiMode = 'hint' | 'review';
+
+export interface AiResponse {
+  text: string;
+}
+```
+
+## 2. Extend `GameService`
+
+Replace [game.service.ts](./frontend/src/app/services/game.service.ts) with:
+
+```ts
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { computed, inject, Injectable, signal } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
+
+import {
+  AiMode,
+  AiResponse,
+  Coordinates,
+  GuessSubmissionResponse,
+  RoundState,
+  ScoreResponse,
+} from '../models/game.models';
+
+@Injectable({
+  providedIn: 'root',
+})
+export class GameService {
+  private readonly http = inject(HttpClient);
+
+  readonly round = signal<RoundState | null>(null);
+  readonly loading = signal(false);
+  readonly error = signal<string | null>(null);
+
+  readonly roundLabel = computed(() => {
+    const currentRound = this.round();
+    return currentRound ? `${currentRound.roundNumber}/3` : '-/3';
+  });
+
+  clear(): void {
+    this.round.set(null);
+    this.error.set(null);
+    this.loading.set(false);
+  }
+
+  setRound(round: RoundState): void {
+    this.round.set({
+      ...round,
+      imageId: String(round.imageId),
+    });
+    this.error.set(null);
+  }
+
+  async startGame(): Promise<void> {
+    if (this.loading()) {
+      return;
+    }
+
+    this.loading.set(true);
+    this.error.set(null);
+
+    try {
+      const response = await firstValueFrom(
+        this.http.post<RoundState>('/games/start', {}),
+      );
+
+      if (
+        response.gameId === undefined ||
+        response.roundId === undefined ||
+        response.roundNumber === undefined ||
+        !response.imageId
+      ) {
+        throw new Error('The server returned incomplete round data');
+      }
+
+      this.setRound(response);
+    } catch (error: unknown) {
+      this.error.set(this.getErrorMessage(error));
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  async submitGuess(
+    round: RoundState,
+    guess: Coordinates,
+  ): Promise<GuessSubmissionResponse> {
+    try {
+      const response = await firstValueFrom(
+        this.http.post<GuessSubmissionResponse>(
+          `/games/${round.gameId}/rounds/${round.roundId}/guess`,
+          {
+            guessLat: guess.lat,
+            guessLng: guess.lng,
+          },
+        ),
+      );
+
+      if (
+        !Number.isFinite(response.distance) ||
+        !response.guessLocation ||
+        !response.actualLocation
+      ) {
+        throw new Error('The server returned incomplete guess results');
+      }
+
+      return response;
+    } catch (error: unknown) {
+      throw new Error(this.getErrorMessage(error));
+    }
+  }
+
+  async requestAi(imageId: string, mode: AiMode): Promise<AiResponse> {
+    try {
+      const response = await firstValueFrom(
+        this.http.post<AiResponse>('/streetview/ai-review', {
+          imageId: String(imageId),
+          mode,
+        }),
+      );
+
+      if (!response.text) {
+        throw new Error('The AI returned an empty response');
+      }
+
+      return response;
+    } catch (error: unknown) {
+      throw new Error(this.getErrorMessage(error));
+    }
+  }
+
+  async getScore(gameId: number): Promise<number> {
+    try {
+      const response = await firstValueFrom(
+        this.http.get<ScoreResponse>(`/games/${gameId}/score`),
+      );
+
+      if (!Number.isFinite(response.totalDistance)) {
+        throw new Error('The server returned an invalid final score');
+      }
+
+      return response.totalDistance;
+    } catch (error: unknown) {
+      throw new Error(this.getErrorMessage(error));
+    }
+  }
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof HttpErrorResponse) {
+      const payload = error.error as
+        | { error?: unknown; message?: unknown }
+        | string
+        | null;
+
+      if (typeof payload === 'string') {
+        return payload;
+      }
+
+      if (payload && typeof payload.error === 'string') {
+        return payload.error;
+      }
+
+      if (payload && typeof payload.message === 'string') {
+        return payload.message;
+      }
+
+      return error.message || 'Request failed';
+    }
+
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    return 'Request failed';
+  }
+}
+```
+
+## 3. Add a result-map component
+
+Create this directory:
+
+```text
+frontend/src/app/components/result-map/
+```
+
+Create `result-map.html`:
+
+```html
+<div #mapContainer class="result-map"></div>
+```
+
+Create `result-map.css`:
+
+```css
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.result-map {
+  width: 100%;
+  height: 100%;
+  min-height: 280px;
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+```
+
+Create `result-map.ts`:
+
+```ts
+import {
+  AfterViewInit,
+  Component,
+  ElementRef,
+  Input,
+  OnChanges,
+  OnDestroy,
+  SimpleChanges,
+  ViewChild,
+} from '@angular/core';
+import * as L from 'leaflet';
+
+import {
+  ActualLocation,
+  Coordinates,
+} from '../../models/game.models';
+
+@Component({
+  selector: 'app-result-map',
+  standalone: true,
+  templateUrl: './result-map.html',
+  styleUrl: './result-map.css',
+})
+export class ResultMapComponent
+  implements AfterViewInit, OnChanges, OnDestroy
+{
+  @Input({ required: true }) guessLocation!: Coordinates;
+  @Input({ required: true }) actualLocation!: ActualLocation;
+
+  @ViewChild('mapContainer', { static: true })
+  private readonly mapContainer!: ElementRef<HTMLDivElement>;
+
+  private map: L.Map | null = null;
+  private initialized = false;
+
+  ngAfterViewInit(): void {
+    this.initialized = true;
+    this.renderMap();
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (
+      this.initialized &&
+      (changes['guessLocation'] || changes['actualLocation'])
+    ) {
+      this.renderMap();
+    }
+  }
+
+  ngOnDestroy(): void {
+    this.map?.remove();
+  }
+
+  private renderMap(): void {
+    if (!this.initialized) {
+      return;
+    }
+
+    this.map?.remove();
+
+    const guess = L.latLng(
+      this.guessLocation.lat,
+      this.guessLocation.lng,
+    );
+
+    const actual = L.latLng(
+      this.actualLocation.lat,
+      this.actualLocation.lng,
+    );
+
+    this.map = L.map(this.mapContainer.nativeElement, {
+      zoomControl: true,
+      scrollWheelZoom: true,
+    });
+
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(this.map);
+
+    L.polyline([guess, actual], {
+      color: '#3b82f6',
+      weight: 3,
+      opacity: 0.8,
+    }).addTo(this.map);
+
+    L.circleMarker(guess, {
+      radius: 8,
+      color: '#c93b45',
+      fillColor: '#c93b45',
+      fillOpacity: 0.95,
+    })
+      .bindTooltip('Your guess')
+      .addTo(this.map);
+
+    L.circleMarker(actual, {
+      radius: 8,
+      color: '#10b981',
+      fillColor: '#10b981',
+      fillOpacity: 0.95,
+    })
+      .bindTooltip('Actual location')
+      .addTo(this.map);
+
+    if (guess.equals(actual)) {
+      this.map.setView(guess, 5);
+    } else {
+      this.map.fitBounds(L.latLngBounds([guess, actual]), {
+        padding: [40, 40],
+        maxZoom: 3,
+      });
+    }
+
+    requestAnimationFrame(() => this.map?.invalidateSize());
+  }
+}
+```
+
+## 4. Replace the game-board component class
+
+Replace [game-board.ts](./frontend/src/app/components/game-board/game-board.ts) with:
+
+```ts
+import { Component, OnInit, inject, signal } from '@angular/core';
+
+import {
+  AiMode,
+  Coordinates,
+  GuessSubmissionResponse,
+} from '../../models/game.models';
+import { GameService } from '../../services/game.service';
+import { GuessMapComponent } from '../guess-map/guess-map';
+import { MapillaryViewerComponent } from '../mapillary-viewer/mapillary-viewer';
+import { ResultMapComponent } from '../result-map/result-map';
+
+type GamePhase = 'playing' | 'result' | 'complete';
+
+@Component({
+  selector: 'app-game-board',
+  standalone: true,
+  imports: [
+    MapillaryViewerComponent,
+    GuessMapComponent,
+    ResultMapComponent,
+  ],
+  templateUrl: './game-board.html',
+  styleUrl: './game-board.css',
+})
+export class GameBoardComponent implements OnInit {
+  protected readonly game = inject(GameService);
+
+  protected readonly phase = signal<GamePhase>('playing');
+  protected readonly selectedGuess = signal<Coordinates | null>(null);
+  protected readonly result = signal<GuessSubmissionResponse | null>(null);
+  protected readonly finalScore = signal<number | null>(null);
+
+  protected readonly actionLoading = signal(false);
+  protected readonly actionError = signal<string | null>(null);
+
+  protected readonly aiLoading = signal(false);
+  protected readonly aiError = signal<string | null>(null);
+  protected readonly hintText = signal<string | null>(null);
+  protected readonly reviewText = signal<string | null>(null);
+  protected readonly hintUsed = signal(false);
+
+  ngOnInit(): void {
+    void this.game.startGame();
+  }
+
+  protected onGuessChange(guess: Coordinates | null): void {
+    if (this.phase() === 'playing') {
+      this.selectedGuess.set(guess);
+    }
+  }
+
+  protected async submitGuess(): Promise<void> {
+    const round = this.game.round();
+    const guess = this.selectedGuess();
+
+    if (!round || !guess || this.actionLoading()) {
+      return;
+    }
+
+    this.actionLoading.set(true);
+    this.actionError.set(null);
+
+    try {
+      const response = await this.game.submitGuess(round, guess);
+
+      this.result.set(response);
+      this.phase.set('result');
+      this.selectedGuess.set(null);
+    } catch (error: unknown) {
+      this.actionError.set(this.getErrorMessage(error));
+    } finally {
+      this.actionLoading.set(false);
+    }
+  }
+
+  protected async requestAi(mode: AiMode): Promise<void> {
+    const round = this.game.round();
+
+    if (!round || this.aiLoading()) {
+      return;
+    }
+
+    this.aiLoading.set(true);
+    this.aiError.set(null);
+
+    try {
+      const response = await this.game.requestAi(round.imageId, mode);
+
+      if (mode === 'hint') {
+        this.hintText.set(response.text);
+        this.hintUsed.set(true);
+      } else {
+        this.reviewText.set(response.text);
+      }
+    } catch (error: unknown) {
+      this.aiError.set(this.getErrorMessage(error));
+    } finally {
+      this.aiLoading.set(false);
+    }
+  }
+
+  protected async continueGame(): Promise<void> {
+    const response = this.result();
+
+    if (!response || this.actionLoading()) {
+      return;
+    }
+
+    if (response.newRoundData) {
+      this.resetRoundUi();
+      this.game.setRound(response.newRoundData);
+      this.phase.set('playing');
+      return;
+    }
+
+    await this.showFinalScore();
+  }
+
+  protected async playAgain(): Promise<void> {
+    if (this.actionLoading()) {
+      return;
+    }
+
+    this.actionLoading.set(true);
+    this.actionError.set(null);
+    this.finalScore.set(null);
+    this.game.clear();
+    this.resetRoundUi();
+
+    try {
+      await this.game.startGame();
+
+      if (this.game.round()) {
+        this.phase.set('playing');
+      }
+    } finally {
+      this.actionLoading.set(false);
+    }
+  }
+
+  protected retry(): void {
+    this.game.clear();
+    this.resetRoundUi();
+    this.phase.set('playing');
+    void this.game.startGame();
+  }
+
+  private async showFinalScore(): Promise<void> {
+    const round = this.game.round();
+
+    if (!round) {
+      return;
+    }
+
+    this.actionLoading.set(true);
+    this.actionError.set(null);
+
+    try {
+      const score = await this.game.getScore(round.gameId);
+      this.finalScore.set(score);
+      this.phase.set('complete');
+    } catch (error: unknown) {
+      this.actionError.set(this.getErrorMessage(error));
+    } finally {
+      this.actionLoading.set(false);
+    }
+  }
+
+  private resetRoundUi(): void {
+    this.result.set(null);
+    this.selectedGuess.set(null);
+    this.hintText.set(null);
+    this.reviewText.set(null);
+    this.aiError.set(null);
+    this.hintUsed.set(false);
+  }
+
+  private getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : 'Request failed';
+  }
+}
+```
+
+## 5. Replace the game-board template
+
+Replace [game-board.html](./frontend/src/app/components/game-board/game-board.html) with:
+
+```html
+<section class="game-board">
+  @if (game.loading() && !game.round()) {
+    <div class="loading-panel">Starting game ...</div>
+  }
+
+  @if (game.error()) {
+    <div class="error-panel" role="alert">
+      {{ game.error() }}
+      <button type="button" (click)="retry()">Retry</button>
+    </div>
+  }
+
+  @if (actionError()) {
+    <div class="error-panel" role="alert">
+      {{ actionError() }}
+    </div>
+  }
+
+  @if (game.round(); as currentRound) {
+    @if (phase() === 'playing') {
+      <div class="round-heading">
+        <h2>Round {{ currentRound.roundNumber }} of 3</h2>
+        <p>Choose a location on the map</p>
+      </div>
+
+      <div class="game-layout">
+        <section class="streetview-panel">
+          <app-mapillary-viewer [imageId]="currentRound.imageId" />
+        </section>
+
+        <section class="guess-panel">
+          <div class="guess-status">
+            @if (selectedGuess(); as guess) {
+              Guess selected:
+              {{ guess.lat.toFixed(4) }},
+              {{ guess.lng.toFixed(4) }}
+            } @else {
+              No guess selected yet.
+            }
+          </div>
+
+          <app-guess-map
+            [resetKey]="currentRound.roundId"
+            (guessChange)="onGuessChange($event)"
+          />
+
+          <div class="round-actions">
+            <button
+              class="btn btn-primary"
+              type="button"
+              [disabled]="!selectedGuess() || actionLoading()"
+              (click)="submitGuess()"
+            >
+              {{ actionLoading() ? 'Submitting ...' : 'Submit Guess' }}
+            </button>
+
+            <button
+              class="btn btn-secondary"
+              type="button"
+              [disabled]="aiLoading() || hintUsed()"
+              (click)="requestAi('hint')"
+            >
+              {{ aiLoading() ? 'Thinking ...' : hintUsed() ? 'Hint Used' : 'Hint' }}
+            </button>
+          </div>
+
+          @if (hintText(); as hint) {
+            <aside class="ai-card" role="status" aria-live="polite">
+              <h3>Location hint</h3>
+              <p>{{ hint }}</p>
+            </aside>
+          }
+
+          @if (aiError()) {
+            <p class="error-message" role="alert">{{ aiError() }}</p>
+          }
+        </section>
+      </div>
+    }
+
+    @if (phase() === 'result') {
+      @if (result(); as roundResult) {
+        <section class="round-result">
+          <div class="round-heading">
+            <h2>Round Complete!</h2>
+            <p>Review your guess before continuing.</p>
+          </div>
+
+          <div class="result-layout">
+            <div class="result-column">
+              <div class="result-streetview">
+                <app-mapillary-viewer [imageId]="currentRound.imageId" />
+              </div>
+
+              <div class="ai-card">
+                <h3>AI Review</h3>
+
+                <button
+                  class="btn btn-secondary"
+                  type="button"
+                  [disabled]="aiLoading() || !!reviewText()"
+                  (click)="requestAi('review')"
+                >
+                  {{ aiLoading() ? 'Analyzing ...' : reviewText() ? 'Review Generated' : 'AI Review' }}
+                </button>
+
+                @if (reviewText(); as review) {
+                  <p>{{ review }}</p>
+                }
+
+                @if (aiError()) {
+                  <p class="error-message" role="alert">{{ aiError() }}</p>
+                }
+              </div>
+            </div>
+
+            <div class="result-column">
+              <div class="result-map-panel">
+                <app-result-map
+                  [guessLocation]="roundResult.guessLocation"
+                  [actualLocation]="roundResult.actualLocation"
+                />
+              </div>
+
+              <div class="result-summary">
+                <strong>
+                  {{ roundResult.distance.toFixed(2) }} km from the location
+                </strong>
+                <span>
+                  Actual location: {{ roundResult.actualLocation.location }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="round-actions">
+            <button
+              class="btn btn-primary"
+              type="button"
+              [disabled]="actionLoading()"
+              (click)="continueGame()"
+            >
+              {{
+                roundResult.newRoundData
+                  ? 'Next Round'
+                  : 'See Final Score'
+              }}
+            </button>
+          </div>
+        </section>
+      }
+    }
+  }
+
+  @if (phase() === 'complete') {
+    <section class="game-over">
+      <h2>Game Over!</h2>
+      <p>Your total distance from the locations was:</p>
+
+      @if (finalScore(); as score) {
+        <p class="final-score">{{ score.toFixed(0) }} km</p>
+      }
+
+      <button
+        class="btn btn-primary"
+        type="button"
+        [disabled]="actionLoading()"
+        (click)="playAgain()"
+      >
+        {{ actionLoading() ? 'Starting ...' : 'Play Again' }}
+      </button>
+    </section>
+  }
+</section>
+```
+
+## 6. Append styles
+
+Append this to [game-board.css](./frontend/src/app/components/game-board/game-board.css):
+
+```css
+.round-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.round-actions .btn {
+  flex: 1;
+}
+
+.round-result {
+  width: 100%;
+}
+
+.result-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.result-column {
+  min-width: 0;
+}
+
+.result-streetview,
+.result-map-panel {
+  height: min(52vh, 480px);
+  min-height: 320px;
+  padding: 0.75rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.75rem;
+  background: white;
+}
+
+.result-map-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.ai-card {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #bfdbfe;
+  border-left: 4px solid var(--primary-color);
+  border-radius: 0.75rem;
+  background: #eff6ff;
+}
+
+.ai-card h3 {
+  margin-top: 0;
+}
+
+.ai-card p {
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.result-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  background: white;
+  border: 1px solid #dbe3ee;
+}
+
+.game-over {
+  max-width: 600px;
+  margin: 3rem auto;
+  padding: 3rem 2rem;
+  text-align: center;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.75rem;
+  background: white;
+}
+
+.final-score {
+  margin: 1rem 0 2rem;
+  color: var(--primary-color);
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .result-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .round-actions {
+    flex-direction: column;
+  }
+}
+```
+
+## Recommended backend fixes
+
+These are not required for the Angular UI, but I recommend applying them manually.
+
+### Protect the score endpoint
+
+The current score route accepts any authenticated `gameId`. In [gameRouter.js](./routers/gameRouter.js), add ownership filtering to the `Rounds.findAll()` query:
+
+```js
+const rounds = await Rounds.findAll({
+  where: { gameId },
+  attributes: ["distance"],
+  include: [
+    {
+      model: Games,
+      as: "game",
+      attributes: [],
+      where: {
+        gameId,
+        userId: req.user.userId,
+        status: "completed",
+      },
+    },
+  ],
+});
+```
+
+Also reject incomplete scores:
+
+```js
+if (
+  rounds.length !== 3 ||
+  rounds.some((round) => !Number.isFinite(Number(round.distance)))
+) {
+  return res.status(404).json({
+    error: `Did not find a completed three-round game for gameId: ${gameId}`,
+  });
+}
+```
+
+### Fix duplicate-guess responses
+
+The current duplicate-guess branch sends a response from inside the Sequelize transaction and then the outer handler tries to send another response. That can produce `ERR_HTTP_HEADERS_SENT`.
+
+Replace:
+
+```js
+return res
+  .status(409)
+  .json({ error: "That round has already been guessed" });
+```
+
+with:
+
+```js
+const duplicateGuessError = new Error(
+  "That round has already been guessed",
+);
+
+duplicateGuessError.status = 409;
+throw duplicateGuessError;
+```
+
+Then update the catch block:
+
+```js
+} catch (error) {
+  console.log(error);
+
+  const status = error.status === 409 ? 409 : 500;
+  const message =
+    status === 409
+      ? error.message
+      : "Failed to log guess";
+
+  return res.status(status).json({ error: message });
+}
+```
+
+## Manual verification
+
+From the repository root, start Express:
+
+```powershell
+npm start
+```
+
+In a second terminal:
+
+```powershell
+cd frontend
+npm test -- --watch=false
+npm run build
+npm start
+```
+
+Then verify:
+
+1. A map click enables `Submit Guess`.
+2. Submitting creates the round-result view.
+3. The result map shows the red guess marker, green actual marker, and connecting line.
+4. `Hint` calls `/streetview/ai-review` with `"mode": "hint"` and disables itself after success.
+5. `AI Review` appears only after submitting a guess.
+6. `Next Round` loads round 2 and round 3.
+7. After round 3, `See Final Score` loads `/games/:gameId/score`.
+8. `Play Again` starts a new game.
+9. AI errors leave the relevant button usable again.
+10. Refreshing before submitting resumes the current unfinished round.
+
+The build and runtime were not executed during this review, so treat the snippets as manual implementation instructions until your local tests pass.
+
+> The app works great. However there is a visual issue.  After a user presses "Hint", the hint takes up space, resulting in the guess-map being shoved up and not being shown fully.  Not sure if it's an issue from no overflow or not, but can you help me fix it
+
+<details><summary>1 previous message</summary>
+
+> Yes — this is a layout issue in the Angular guess panel, not primarily a missing overflow rule. I’ll inspect your current manually applied game-board template/styles and give you a targeted edit that keeps the map’s height stable when the hint appears. I’ll keep this read-only.
+</details>
+
+The cause is the flex layout: `.guess-panel` has a fixed height, so when the hint card appears, the flexible `<app-guess-map>` shrinks to make room.
+
+Reserve a fixed hint area so the map keeps the same height before and after clicking Hint.
+
+In [game-board.html](./frontend/src/app/components/game-board/game-board.html), replace the current hint block:
+
+```html
+@if (hintText(); as hint) {
+  <aside class="ai-card" role="status" aria-live="polite">
+    <h3>Location hint</h3>
+    <p>{{ hint }}</p>
+  </aside>
+}
+```
+
+with:
+
+```html
+<div class="hint-slot">
+  @if (hintText(); as hint) {
+    <aside class="ai-card" role="status" aria-live="polite">
+      <h3>Location hint</h3>
+      <p>{{ hint }}</p>
+    </aside>
+  }
+</div>
+```
+
+Then append this to [game-board.css](./frontend/src/app/components/game-board/game-board.css):
+
+```css
+.guess-panel {
+  overflow: hidden;
+}
+
+.hint-slot {
+  flex: 0 0 7.5rem;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.hint-slot .ai-card {
+  margin-top: 0;
+}
+```
+
+This reserves approximately 120px for the hint even before it is displayed. The map will remain the same size after the hint loads, and unusually long hints will scroll inside the reserved area.
+
+The existing `.guess-map { overflow: hidden; }` is fine; that rule only clips the map’s own contents and is not causing this issue.
+
+> Is there a way to make the font in the ai-card for the hint smaller, or to do another fix so that the ai-card for the hint doens't have a scroll bar
+
+Yes. The scrollbar comes from the `.hint-slot { overflow-y: auto; }` rule. Make the hint more compact and hide overflow after reserving enough space.
+
+In [game-board.css](./frontend/src/app/components/game-board/game-board.css), use:
+
+```css
+.hint-slot {
+  flex: 0 0 8.5rem;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.hint-slot .ai-card {
+  margin-top: 0;
+  padding: 0.75rem 0.875rem;
+}
+
+.hint-slot .ai-card h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+}
+
+.hint-slot .ai-card p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+```
+
+This gives the hint approximately 136px of reserved space, reduces the font size, and removes the scrollbar.
+
+If the map becomes slightly too short, reduce the slot to:
+
+```css
+flex: 0 0 7.5rem;
+```
+
+The hint endpoint is already instructed to return only 1–3 sentences, so the compact styling should normally fit without clipping.
+
+> can we make the footer smaller so that the game-layout can take more space, giving more space to the streetview and guess-panel?
+
+<details><summary>1 previous message</summary>
+
+> Yes. The footer is currently taking about 3.5–4rem, and the game panels also have their own `62vh` height cap. I’ll give you the smallest footer change plus the panel-height adjustment needed for the freed space to actually reach Street View and the guess map.
+</details>
+
+Yes. The footer currently uses `1.25rem` padding, but the game panels are also capped at `62vh`. Change both.
+
+In [app.css](./frontend/src/app/app.css), replace `.footer` with:
+
+```css
+.footer {
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--border-color);
+  background: var(--surface);
+  color: var(--text-secondary);
+  text-align: center;
+  font-size: 0.75rem;
+}
+```
+
+Then in [game-board.css](./frontend/src/app/components/game-board/game-board.css), change:
+
+```css
+height: min(62vh, 620px);
+```
+
+to:
+
+```css
+height: min(68vh, 680px);
+```
+
+Your existing mobile rule keeps the panels at `480px` below `900px`, so desktop gains the extra space without making mobile layouts excessively tall.
+
+Optional: reduce the surrounding page padding slightly too:
+
+```css
+.game-container {
+  padding: 0.5rem 1rem;
+}
+```
+
+> Is there a way we can change the css of our code to allow the ai-card for the hint to expand fully (so we don't need a scroll bar for that object). I don't mind if the page itself gets bigger, causing the page itself to be longer. I prefer no scroll bar for the hint ai-card but also want the card to not be cut off.
+
+Yes. The important fix is to remove the fixed height from `.guess-panel`. Otherwise, changing overflow only makes the hint spill outside or get clipped.
+
+In [game-board.css](./frontend/src/app/components/game-board/game-board.css), change your panel rules to:
+
+```css
+.streetview-panel,
+.guess-panel {
+  min-width: 0;
+  height: auto;
+  min-height: max(420px, min(68vh, 680px));
+  padding: 1rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.75rem;
+  background: white;
+}
+
+.guess-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+.guess-panel app-guess-map {
+  flex: 0 0 360px;
+  min-height: 360px;
+}
+
+.hint-slot {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+.hint-slot .ai-card {
+  margin-top: 0;
+  max-height: none;
+  overflow: visible;
+}
+```
+
+Also update the mobile media rule. Replace:
+
+```css
+.streetview-panel,
+.guess-panel {
+  height: 480px;
+}
+```
+
+with:
+
+```css
+.streetview-panel,
+.guess-panel {
+  height: auto;
+  min-height: 480px;
+}
+
+.guess-panel app-guess-map {
+  flex-basis: 320px;
+  min-height: 320px;
+}
+```
+
+This gives the map a stable minimum height, while allowing the hint card to expand naturally. The guess panel—and therefore the page—will become taller when the hint appears, with no scrollbar and no clipped text.
+
+Do not use only `overflow: visible`; the fixed `height` must also become `height: auto`.
+
+> I want to change the Angular logo found on the tab of my webpage to 🌍 if possible as well.
+
+<details><summary>1 previous message</summary>
+
+> Yes. That tab icon is the favicon. I’ll check how your Angular entry page currently references the default icon, then give you the smallest manual change to replace it with 🌍.
+</details>
+
+Yes. The current tab icon is referenced in [frontend/src/index.html](./frontend/src/index.html:8):
+
+```html
+<link rel="icon" type="image/x-icon" href="favicon.ico" />
+```
+
+A reliable approach is to create `frontend/public/globe.svg`:
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <text
+    x="50%"
+    y="50%"
+    text-anchor="middle"
+    dominant-baseline="central"
+    font-size="82"
+  >🌍</text>
+</svg>
+```
+
+Then replace the favicon link in `frontend/src/index.html` with:
+
+```html
+<link rel="icon" type="image/svg+xml" href="globe.svg" />
+```
+
+Angular copies files from `public` into the built site, so no `angular.json` change is needed.
+
+After restarting Angular, hard-refresh the page. Browsers cache favicons aggressively.
+
+> how do i create a globe.svg file with that image in it?
+
+1. Open this folder:
+
+```text
+\\wsl.localhost\Ubuntu\home\spambuddy\cscc09\project-geoguesser\frontend\public
+```
+
+2. Create a new file named exactly:
+
+```text
+globe.svg
+```
+
+Make sure it is not named `globe.svg.txt`.
+
+3. Paste this into the file:
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <text
+    x="50%"
+    y="50%"
+    text-anchor="middle"
+    dominant-baseline="central"
+    font-size="82"
+  >🌍</text>
+</svg>
+```
+
+4. In `frontend/src/index.html`, use:
+
+```html
+<link rel="icon" type="image/svg+xml" href="globe.svg" />
+```
+
+5. Restart Angular and hard-refresh the page.
+
+The existing `favicon.ico` can remain; Angular will use `globe.svg` because it is now the referenced icon.
+
+> ive created the file but im having trouble pasting the image into it.
+
+You do not need to paste an image file. The `globe.svg` file should contain SVG text that displays the 🌍 emoji.
+
+Open `globe.svg` in VS Code or Notepad, then paste this entire block into the editor:
+
+```svg
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <text
+    x="50%"
+    y="50%"
+    text-anchor="middle"
+    dominant-baseline="central"
+    font-size="82"
+  >🌍</text>
+</svg>
+```
+
+Then save with `Ctrl+S`.
+
+Verify that:
+
+- The file is named `globe.svg`, not `globe.svg.txt`.
+- The first character in the file is `<`.
+- You are pasting into the file editor, not into File Explorer.
+- [index.html](./frontend/src/index.html) contains:
+
+```html
+<link rel="icon" type="image/svg+xml" href="globe.svg" />
+```
+
+You can test it by opening:
+
+```text
+http://localhost:4200/globe.svg
+```
+
+You should see the globe emoji displayed on the page.

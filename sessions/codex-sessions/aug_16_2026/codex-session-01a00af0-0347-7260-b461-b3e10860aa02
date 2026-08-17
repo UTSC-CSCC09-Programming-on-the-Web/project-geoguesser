@@ -1,0 +1,176 @@
+# Add presentable unique usernames
+
+> Is there a way we can enforce unique usernames for the part that says "Logged in as .... (subscription required)", but make the usernames presentable?
+>
+> At the moment, the usernames look like this: tommy_douglas_104223390454576374817 which doesn't look appealing on the frontend. Ideally I would like only letters, and if necessary a single number or two.
+>
+> Please do not change the codebase and let me modify the files myself. Leave the code to do so below.
+
+<details><summary>2 previous messages</summary>
+
+> I’ll inspect the current username creation and display flow, then give you copyable edits only—no files will be changed. I’ll also check the project notes for any prior authentication decisions so the advice matches this checkout.
+>
+> The relevant path is confirmed: the frontend is only displaying `currentUser.username`; the backend creates that value during first Google login. The database already marks `Users.username` as unique, but the current creation code appends the full Google profile ID, which is why the display is unattractive. I’m checking the exact surrounding code now so the replacement handles collisions safely and consistently.
+</details>
+
+Yes. The frontend already displays the backend’s `username`; the change belongs in [`routers/authBillingRouter.js`](<./routers/authBillingRouter.js:86>). The database already has `username: { unique: true }` in [`database/models/users.js`](<./database/models/users.js:22>).
+
+Replace the unused `generateUniqueUsername` function and the current `findOrCreateUser` function with the following.
+
+First, add this import:
+
+```js
+import { UniqueConstraintError } from "sequelize";
+```
+
+Then use:
+
+```js
+function makeUsernameBase(displayName, email) {
+  const source = displayName?.trim() || email?.split("@")[0] || "Player";
+
+  const words =
+    source
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .match(/[A-Za-z]+/g) || [];
+
+  const base = words
+    .map(
+      (word) =>
+        word[0].toUpperCase() + word.slice(1).toLowerCase(),
+    )
+    .join("")
+    .slice(0, 20);
+
+  return base || "Player";
+}
+
+async function generateUniqueUsername(
+  displayName,
+  email,
+  transaction,
+) {
+  const baseUsername = makeUsernameBase(displayName, email);
+
+  for (let suffix = 0; suffix <= 99; suffix += 1) {
+    const candidate =
+      suffix === 0 ? baseUsername : `${baseUsername}${suffix}`;
+
+    const existingUser = await Users.findOne({
+      where: { username: candidate },
+      attributes: ["userId"],
+      transaction,
+    });
+
+    if (!existingUser) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    `Unable to create a unique username for "${baseUsername}"`,
+  );
+}
+
+const findOrCreateUser = async (profile) => {
+  const providerUserId = profile.id;
+  const email = profile.emails?.[0]?.value;
+
+  if (!email) {
+    throw new Error("Google profile did not include an email address");
+  }
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      return await sequelize.transaction(async (transaction) => {
+        const existingUser = await Users.findOne({
+          where: {
+            authProvider: "google",
+            providerUserId,
+          },
+          transaction,
+        });
+
+        if (existingUser) {
+          return existingUser;
+        }
+
+        const username = await generateUniqueUsername(
+          profile.displayName,
+          email,
+          transaction,
+        );
+
+        const newUser = await Users.create(
+          {
+            email,
+            username,
+            authProvider: "google",
+            providerUserId,
+          },
+          { transaction },
+        );
+
+        await Subscriptions.create(
+          {
+            userId: newUser.userId,
+            status: "pending_payment",
+          },
+          { transaction },
+        );
+
+        return newUser;
+      });
+    } catch (error) {
+      if (
+        !(error instanceof UniqueConstraintError) ||
+        attempt === 4
+      ) {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error("Unable to create a unique user record");
+};
+```
+
+Examples:
+
+```text
+TommyDouglas
+TommyDouglas1
+TommyDouglas2
+```
+
+To validate the format at the model level, update the `username` field in [`database/models/users.js`](<./database/models/users.js:22>):
+
+```js
+username: {
+  type: DataTypes.STRING,
+  allowNull: false,
+  unique: true,
+  validate: {
+    notEmpty: true,
+    len: [1, 22],
+    is: /^[A-Za-z]+[0-9]{0,2}$/,
+  },
+},
+```
+
+No change is needed in [`auth.service.ts`](<./frontend/src/app/services/auth.service.ts:32>) or [`static/js/auth.js`](<./static/js/auth.js:56>); both already display the returned username.
+
+Existing accounts will keep their old usernames because they are returned by `findOrCreateUser` without modification. To update one manually:
+
+```sql
+SELECT email, username
+FROM "Users"
+WHERE email = 'your-email@example.com';
+
+UPDATE "Users"
+SET username = 'TommyDouglas'
+WHERE email = 'your-email@example.com';
+```
+
+Check that the desired username is not already in use first.

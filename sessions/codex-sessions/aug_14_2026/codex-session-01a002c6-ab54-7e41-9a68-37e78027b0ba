@@ -1,0 +1,904 @@
+# Build Angular shell and auth
+
+> Ok, I believe I have done steps 1 - 3 correctly. Can we now implement steps 4 - 6?
+>
+> To recall, you broke down the procedure into these chunks:
+>
+> Document and verify the existing API response shapes.
+> Scaffold the Angular project.
+> Add development proxying to Express. (done up til here)
+> Build the Angular shell and header.
+> Implement authentication and subscription state.
+> Implement the access gate.
+> Implement game start and round state.
+> Integrate the Mapillary Street View component.
+> Integrate the Leaflet guessing map.
+> Implement guess submission and round results.
+> Implement AI hints and AI reviews.
+> Implement final score and “Play Again.”
+> Test refreshes, errors, authentication, and all three rounds.
+> Build Angular for production.
+> Serve the Angular build through the existing deployment.
+> Remove the old static frontend only after Angular has feature parity.
+>
+> Do not change the code base. Please leave any code with clear instructions and I will edit the codebase myself
+
+<details><summary>3 previous messages</summary>
+
+> I’ll inspect the current Angular scaffold, proxy setup, Express auth/API routes, and existing frontend patterns, then I’ll give you paste-ready instructions for steps 4–6 without modifying any files. I’m also checking the project notes so the guidance matches the decisions already made for this GeoGuesser checkout.
+>
+> The repository does contain a generated Angular app under `frontend/`, and the existing server-side frontend remains under `static/`. I’m now checking whether steps 1–3 are actually present in the files, especially the proxy target and the exact auth/subscription endpoints that steps 5–6 must call.
+>
+> The existing scaffold is still the default Angular welcome screen, so steps 4–6 can be implemented cleanly without touching the old static scripts. The server contract is confirmed: `/api/me` returns `{ user: { userId, email, username, subscriptionStatus } }`; login is `/auth/google`; checkout is `POST /api/create-checkout-session`; logout is `/auth/logout`; gameplay is already protected server-side by both authentication and active-subscription middleware.
+
+</details>
+
+Yes. I inspected the current state and did not modify the codebase. The Angular project is still the default scaffold, while the existing backend contracts are ready for steps 4–6.
+
+Before editing, set:
+
+```env
+FRONTEND_URL=http://localhost:4200
+```
+
+Otherwise the OAuth callback will redirect to the old Express frontend on port 3000.
+
+## 1. Add the auth model
+
+Create:
+
+`frontend/src/app/models/auth.models.ts`
+
+```ts
+export interface CurrentUser {
+  userId: number;
+  email: string;
+  username: string;
+  subscriptionStatus: string;
+}
+
+export interface CurrentUserResponse {
+  user: CurrentUser;
+}
+
+export interface CheckoutResponse {
+  url: string;
+}
+```
+
+## 2. Add the authentication service
+
+Create:
+
+`frontend/src/app/services/auth.service.ts`
+
+```ts
+import { HttpClient, HttpErrorResponse } from "@angular/common/http";
+import { computed, inject, Injectable, signal } from "@angular/core";
+import { firstValueFrom } from "rxjs";
+
+import {
+  CheckoutResponse,
+  CurrentUser,
+  CurrentUserResponse,
+} from "../models/auth.models";
+
+@Injectable({
+  providedIn: "root",
+})
+export class AuthService {
+  private readonly http = inject(HttpClient);
+
+  readonly user = signal<CurrentUser | null>(null);
+  readonly ready = signal(false);
+  readonly loading = signal(false);
+  readonly error = signal<string | null>(null);
+
+  readonly canPlay = computed(
+    () => this.user()?.subscriptionStatus === "active",
+  );
+
+  readonly statusText = computed(() => {
+    if (!this.ready()) {
+      return "Checking login...";
+    }
+
+    const currentUser = this.user();
+
+    if (!currentUser) {
+      return "Not logged in";
+    }
+
+    return this.canPlay()
+      ? `Logged in as ${currentUser.username} (subscription active)`
+      : `Logged in as ${currentUser.username} (subscription required)`;
+  });
+
+  async initialize(): Promise<void> {
+    this.loading.set(true);
+    this.error.set(null);
+
+    try {
+      await this.handleUrlState();
+
+      const response = await firstValueFrom(
+        this.http.get<CurrentUserResponse>("/api/me"),
+      );
+
+      this.user.set(response.user);
+    } catch (error: unknown) {
+      this.user.set(null);
+
+      if (
+        !(error instanceof HttpErrorResponse) ||
+        ![401, 403].includes(error.status)
+      ) {
+        this.error.set(this.getErrorMessage(error));
+      }
+    } finally {
+      this.ready.set(true);
+      this.loading.set(false);
+    }
+  }
+
+  login(): void {
+    window.location.assign("/auth/google");
+  }
+
+  async logout(): Promise<void> {
+    this.loading.set(true);
+    this.error.set(null);
+
+    try {
+      await firstValueFrom(this.http.get("/auth/logout"));
+    } catch (error: unknown) {
+      this.error.set(this.getErrorMessage(error));
+    } finally {
+      this.user.set(null);
+      this.ready.set(true);
+      this.loading.set(false);
+    }
+  }
+
+  async startCheckout(): Promise<void> {
+    this.loading.set(true);
+    this.error.set(null);
+
+    try {
+      const response = await firstValueFrom(
+        this.http.post<CheckoutResponse>("/api/create-checkout-session", {}),
+      );
+
+      if (!response.url) {
+        throw new Error("Checkout URL was not returned.");
+      }
+
+      window.location.assign(response.url);
+    } catch (error: unknown) {
+      this.error.set(this.getErrorMessage(error));
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  private async handleUrlState(): Promise<void> {
+    const params = new URLSearchParams(window.location.search);
+    const checkoutStatus = params.get("checkout");
+    const sessionId = params.get("session_id");
+    const loginStatus = params.get("login");
+
+    if (checkoutStatus === "success" && sessionId) {
+      try {
+        await firstValueFrom(
+          this.http.get(
+            `/api/checkout/confirm?session_id=${encodeURIComponent(sessionId)}`,
+          ),
+        );
+      } catch (error: unknown) {
+        this.error.set(this.getErrorMessage(error));
+      }
+
+      this.removeQueryParameters(["checkout", "session_id"]);
+    } else if (checkoutStatus) {
+      this.removeQueryParameters(["checkout"]);
+    }
+
+    if (loginStatus === "failed") {
+      this.error.set("Google login failed.");
+      this.removeQueryParameters(["login"]);
+    } else if (loginStatus === "unavailable") {
+      this.error.set("Google login is not configured.");
+      this.removeQueryParameters(["login"]);
+    }
+  }
+
+  private removeQueryParameters(parameters: string[]): void {
+    const url = new URL(window.location.href);
+
+    for (const parameter of parameters) {
+      url.searchParams.delete(parameter);
+    }
+
+    const query = url.searchParams.toString();
+    const nextUrl = `${url.pathname}${query ? `?${query}` : ""}${url.hash}`;
+
+    window.history.replaceState({}, document.title, nextUrl);
+  }
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof HttpErrorResponse) {
+      const payload = error.error as
+        | { error?: unknown; message?: unknown }
+        | string
+        | null;
+
+      if (typeof payload === "string") {
+        return payload;
+      }
+
+      if (payload && typeof payload.error === "string") {
+        return payload.error;
+      }
+
+      if (payload && typeof payload.message === "string") {
+        return payload.message;
+      }
+
+      return error.message || "Request failed.";
+    }
+
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    return "Request failed.";
+  }
+}
+```
+
+## 3. Enable Angular HTTP
+
+Replace:
+
+`frontend/src/app/app.config.ts`
+
+with:
+
+```ts
+import {
+  ApplicationConfig,
+  provideBrowserGlobalErrorListeners,
+} from "@angular/core";
+import { provideHttpClient } from "@angular/common/http";
+import { provideRouter } from "@angular/router";
+
+import { routes } from "./app.routes";
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideBrowserGlobalErrorListeners(),
+    provideRouter(routes),
+    provideHttpClient(),
+  ],
+};
+```
+
+## 4. Replace the root component
+
+Replace:
+
+`frontend/src/app/app.ts`
+
+with:
+
+```ts
+import { Component, inject, OnInit } from "@angular/core";
+
+import { AuthService } from "./services/auth.service";
+
+@Component({
+  selector: "app-root",
+  templateUrl: "./app.html",
+  styleUrl: "./app.css",
+})
+export class App implements OnInit {
+  protected readonly auth = inject(AuthService);
+
+  ngOnInit(): void {
+    void this.auth.initialize();
+  }
+
+  async subscribe(): Promise<void> {
+    await this.auth.startCheckout();
+  }
+
+  async logout(): Promise<void> {
+    await this.auth.logout();
+  }
+}
+```
+
+Do not call `/games/start` yet. That belongs to step 7.
+
+## 5. Replace the Angular template
+
+Replace:
+
+`frontend/src/app/app.html`
+
+with:
+
+```html
+<div class="app-shell">
+  <header class="header">
+    <div class="header-content">
+      <h1 class="logo">🌍 GeoGuesser</h1>
+
+      <div class="header-controls">
+        <div class="round-stat">
+          <span class="stat-label">Round</span>
+          <span class="stat-value">—/3</span>
+        </div>
+
+        <div class="auth-controls">
+          <span class="auth-status"> {{ auth.statusText() }} </span>
+
+          @if (!auth.user()) {
+          <button
+            class="btn btn-secondary auth-btn"
+            type="button"
+            (click)="auth.login()"
+          >
+            Login with Google
+          </button>
+          } @else { @if (!auth.canPlay()) {
+          <button
+            class="btn btn-secondary auth-btn"
+            type="button"
+            [disabled]="auth.loading()"
+            (click)="subscribe()"
+          >
+            Subscribe for AI
+          </button>
+          }
+
+          <button
+            class="btn btn-secondary auth-btn"
+            type="button"
+            [disabled]="auth.loading()"
+            (click)="logout()"
+          >
+            Logout
+          </button>
+          }
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="game-container">
+    @if (!auth.ready()) {
+    <section class="loading-panel" aria-live="polite">
+      Checking authentication…
+    </section>
+    } @else {
+    <section class="game-stage" [class.locked]="!auth.canPlay()">
+      <div class="placeholder-card">
+        @if (auth.canPlay()) {
+        <h2>Game shell ready</h2>
+        <p>
+          Authentication and subscription access are active. Gameplay will be
+          added in step 7.
+        </p>
+        } @else {
+        <h2>Gameplay locked</h2>
+        <p>Sign in and activate your subscription to unlock the game.</p>
+        }
+      </div>
+
+      @if (auth.error()) {
+      <p class="error-message" role="alert">{{ auth.error() }}</p>
+      } @if (!auth.canPlay()) {
+      <section class="access-gate" aria-labelledby="access-gate-title">
+        <div class="access-gate-content">
+          <h2 id="access-gate-title">Login + active subscription required</h2>
+
+          <p>
+            @if (!auth.user()) { Sign in with Google to unlock gameplay. } @else
+            { Complete checkout to unlock gameplay. }
+          </p>
+
+          @if (!auth.user()) {
+          <button class="btn btn-primary" type="button" (click)="auth.login()">
+            Login with Google
+          </button>
+          } @else {
+          <button
+            class="btn btn-primary"
+            type="button"
+            [disabled]="auth.loading()"
+            (click)="subscribe()"
+          >
+            Subscribe for AI
+          </button>
+          }
+        </div>
+      </section>
+      }
+    </section>
+    }
+  </main>
+
+  <footer class="footer">© 2026 GeoGuesser Replica</footer>
+</div>
+```
+
+## 6. Replace the component CSS
+
+Replace:
+
+`frontend/src/app/app.css`
+
+with:
+
+```css
+:host {
+  display: block;
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  background: var(--surface);
+  border-bottom: 2px solid var(--border-color);
+  padding: 1.25rem;
+  box-shadow: var(--shadow);
+}
+
+.header-content {
+  width: min(100%, 1920px);
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.logo {
+  margin: 0;
+  color: var(--primary-color);
+  font-size: 1.875rem;
+}
+
+.header-controls,
+.auth-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.round-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.stat-label {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.stat-value {
+  color: var(--primary-color);
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.auth-status {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.auth-btn {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+.game-container {
+  flex: 1;
+  position: relative;
+  padding: 1rem;
+}
+
+.game-stage {
+  position: relative;
+  width: min(100%, 1200px);
+  min-height: 420px;
+  margin: 0 auto;
+  display: grid;
+  place-items: center;
+}
+
+.game-stage.locked .placeholder-card {
+  filter: blur(2px) grayscale(0.5);
+  pointer-events: none;
+  user-select: none;
+}
+
+.placeholder-card,
+.access-gate-content {
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 2rem;
+  text-align: center;
+}
+
+.placeholder-card {
+  width: min(100%, 620px);
+}
+
+.placeholder-card h2 {
+  margin-top: 0;
+}
+
+.access-gate {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.access-gate-content {
+  width: min(100%, 520px);
+}
+
+.access-gate-content h2 {
+  margin-top: 0;
+}
+
+.loading-panel {
+  display: grid;
+  min-height: 420px;
+  place-items: center;
+  color: var(--text-secondary);
+}
+
+.error-message {
+  margin: 1rem auto;
+  color: #b91c1c;
+  text-align: center;
+}
+
+.footer {
+  padding: 1.25rem;
+  border-top: 2px solid var(--border-color);
+  background: var(--surface);
+  color: var(--text-secondary);
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+.btn {
+  border: 0;
+  border-radius: var(--radius);
+  padding: 0.75rem 1.25rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.btn-primary {
+  background: var(--primary-color);
+  color: white;
+}
+
+.btn-secondary {
+  border: 2px solid var(--border-color);
+  background: var(--background);
+  color: var(--text-primary);
+}
+
+@media (max-width: 760px) {
+  .header-content,
+  .header-controls,
+  .auth-controls {
+    flex-direction: column;
+  }
+
+  .auth-controls {
+    align-items: stretch;
+  }
+
+  .auth-status {
+    text-align: center;
+  }
+
+  .auth-btn {
+    width: 100%;
+  }
+}
+```
+
+## 7. Replace global styles
+
+Replace:
+
+`frontend/src/styles.css`
+
+with:
+
+```css
+:root {
+  --primary-color: #3b82f6;
+  --background: #f8fafc;
+  --surface: #ffffff;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --border-color: #e2e8f0;
+  --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.12);
+  --radius: 0.5rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  background: var(--background);
+  color: var(--text-primary);
+}
+```
+
+## 8. Update the default Angular test
+
+The current test expects `Hello, frontend`, so replace the contents of:
+
+`frontend/src/app/app.spec.ts`
+
+with:
+
+```ts
+import { TestBed } from "@angular/core/testing";
+import { provideHttpClient } from "@angular/common/http";
+import { provideHttpClientTesting } from "@angular/common/http/testing";
+
+import { App } from "./app";
+
+describe("App", () => {
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [App],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+  });
+
+  it("should create the app", () => {
+    const fixture = TestBed.createComponent(App);
+
+    expect(fixture.componentInstance).toBeTruthy();
+  });
+});
+```
+
+## Verification
+
+Run the backend in one terminal:
+
+```bash
+cd ~/cscc09/project-geoguesser
+npm run dev
+```
+
+Run Angular in another:
+
+```bash
+cd ~/cscc09/project-geoguesser/frontend
+npm start
+```
+
+Open:
+
+```text
+http://localhost:4200
+```
+
+Expected behavior:
+
+- Unauthenticated user sees the access gate and Login button.
+- `/api/me` returns `401`, but the Angular app remains usable.
+- Authenticated unsubscribed user sees the Subscribe button and locked gate.
+- Authenticated active subscriber sees the unlocked shell.
+- Logout returns the app to the locked state.
+- No request to `/games/start` should occur yet.
+- The old `static/` frontend and its JavaScript files remain untouched.
+
+> can you check my project and see if the code has been written as you wanted it to be? Please do not modify the codebase. If changes need to be made, please provide clear instructions here and let me know.
+
+<details><summary>3 previous messages</summary>
+
+> I’ll perform a read-only review of the Angular files and compare them against the steps 4–6 implementation I gave you. I’ll check the auth service behavior, API paths, access-gate logic, Angular configuration, tests, and whether any old static frontend code was accidentally changed. I will not edit anything.
+>
+> The repository path is readable, but Git commands from the current PowerShell context do not recognize the WSL UNC path as a Git working tree, so I’ll base the review on the actual files and call sites. I’m continuing with a direct source inspection; this does not affect the codebase.
+>
+> The main implementation is present and matches the intended structure. I found one functional presentation bug and two small cleanup issues in the Angular template; I’m doing one final pass for build/config consistency before reporting the exact manual edits.
+
+</details>
+
+I reviewed the project read-only. The implementation is largely correct and matches steps 4–6.
+
+Confirmed working structure:
+
+- `auth.models.ts` exists with the correct response shapes.
+- `auth.service.ts` calls the correct endpoints:
+  - `/api/me`
+  - `/auth/google`
+  - `/auth/logout`
+  - `/api/create-checkout-session`
+  - `/api/checkout/confirm`
+- `provideHttpClient()` is configured.
+- The access gate correctly depends on `subscriptionStatus === "active"`.
+- The Angular proxy covers `/api`, `/auth`, `/games`, and `/streetview`.
+- The default Angular test was updated.
+- No Mapillary, Leaflet, or `/games/start` code has been added prematurely.
+
+I found one functional issue:
+
+In [app.html](./frontend/src/app/app.html), three buttons use:
+
+```html
+class="btn bth-secondary auth-btn"
+```
+
+Change every `bth-secondary` to `btn-secondary`:
+
+```html
+class="btn btn-secondary auth-btn"
+```
+
+Otherwise the header buttons will not receive the intended secondary-button styling.
+
+Two minor cleanup changes:
+
+In [index.html](./frontend/src/index.html), change:
+
+```html
+<title>Frontend</title>
+```
+
+to:
+
+```html
+<title>GeoGuesser</title>
+```
+
+In [app.html](./frontend/src/app/app.html), change:
+
+```html
+<h2>Gamplay locked</h2>
+```
+
+to:
+
+```html
+<h2>Gameplay locked</h2>
+```
+
+Optionally change `-/3` to `—/3`.
+
+After making those manual edits, verify with:
+
+```bash
+cd ~/cscc09/project-geoguesser/frontend
+npm test -- --watch=false
+npm run build
+```
+
+I did not modify any files.
+
+> can you explain to me what the code changes here did? can you provide me the name for the git commit? Do the steps for my procedure change, or can they still be the same? Leaving the procedure below for details:
+>
+> Document and verify the existing API response shapes.
+> Scaffold the Angular project.
+> Add development proxying to Express. (done up til here)
+> Build the Angular shell and header.
+> Implement authentication and subscription state.
+> Implement the access gate.
+> Implement game start and round state.
+> Integrate the Mapillary Street View component.
+> Integrate the Leaflet guessing map.
+> Implement guess submission and round results.
+> Implement AI hints and AI reviews.
+> Implement final score and “Play Again.”
+> Test refreshes, errors, authentication, and all three rounds.
+> Build Angular for production.
+> Serve the Angular build through the existing deployment.
+> Remove the old static frontend only after Angular has feature parity.
+
+The changes implement the Angular foundation for steps 4–6. They do not implement gameplay yet.
+
+### What the changes do
+
+- `auth.models.ts` defines the expected user and checkout response shapes.
+- `auth.service.ts` centralizes authentication state using Angular signals:
+  - Loads `/api/me`
+  - Handles Google login
+  - Handles logout
+  - Starts Stripe checkout
+  - Confirms successful checkout
+  - Determines whether the user can play
+- `app.config.ts` enables Angular `HttpClient`.
+- `app.ts` initializes authentication when the app starts.
+- `app.html` creates the Angular shell:
+  - Header
+  - Round indicator
+  - Login, subscribe, and logout controls
+  - Footer
+  - Loading and error states
+- The access gate displays when the user is unauthenticated or lacks an active subscription.
+- The server still protects `/games` and `/streetview`; the Angular gate is only the user-facing layer.
+- `app.css` and `styles.css` add the layout and styling.
+- The default Angular test was updated so it no longer expects “Hello, frontend.”
+
+A few small fixes should be made before committing:
+
+```html
+bth-secondary
+```
+
+should be:
+
+```html
+btn-secondary
+```
+
+Also change the page title from `Frontend` to `GeoGuesser` and correct `Gamplay locked` to `Gameplay locked`.
+
+### Recommended commit message
+
+```text
+feat(frontend): add Angular shell authentication and access gate
+```
+
+I have not created the commit.
+
+### Does the procedure change?
+
+No. The procedure remains the same:
+
+1. Existing API response shapes — complete
+2. Angular project scaffold — complete
+3. Development proxy — complete
+4. Angular shell and header — complete
+5. Authentication and subscription state — complete
+6. Access gate — complete
+7. Game start and round state — next
+
+The next step is still implementing game start and round state. The current Angular shell intentionally does not call `/games/start` yet.
+
+One development configuration detail remains important:
+
+```env
+FRONTEND_URL=http://localhost:4200
+```
+
+This ensures Google OAuth and Stripe return to the Angular development server instead of the old Express frontend on port 3000.

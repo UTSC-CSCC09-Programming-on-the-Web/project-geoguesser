@@ -1,0 +1,829 @@
+# Review project requirements
+
+> can you confirm for me that my application satisifes the requirements for the project, which is here: [https://cscc09.com/work/project](https://cscc09.com/work/project) You can ignore deployment for now, as I will deploy shortly.
+>
+> Please do not modify the codebase. Leave the code and I will modify the code myself.
+
+<details><summary>6 previous messages</summary>
+
+> I’ll do a read-only audit: first map the repository’s implemented features and verification status, then compare them line-by-line with the current project requirements. I’ll leave the code untouched and clearly separate “satisfied by inspection” from anything that still needs runtime proof.
+>
+> The repository inspection hit a temporary shell setup error, not an application error. I’m retrying with narrower read-only commands so the audit does not confuse tooling failure with missing functionality.
+>
+> <details><summary>Called a tool, searched the web</summary>
+>
+> Searched the web for `https://cscc09.com/work/project`
+>
+> Searched the web for `site:cscc09.com/work/project CSCC09 project requirements`
+>
+> Searched the web for `site:cscc09.com "Group Project" "React" "OAuth" ...`
+>
+> Searched the web for `"cscc09.com/work/project" ...`
+>
+> Searched the web for `https://github.com/choyiny/cscc09`
+>
+> Searched the web for `https://raw.githubusercontent.com/choyiny/cscc09.com/main/src/content/coursework/project.md`
+>
+> Searched the web for `https://api.github.com/repos/choyiny/cscc09.com/contents/src/content/coursework/project.md`
+>
+> MCP tool call
+>
+> node_repl.js
+>
+> ```json
+> {
+>   "title": "Inspect repository files",
+>   "code": "var fs = await import(\"node:fs/promises\"); var path = await import(\"node:path\"); var cwdPath = nodeRepl.cwd; nodeRepl.write(cwdPath);"
+> }
+> ```
+>
+> ```text
+> node_repl kernel exited unexpectedly
+>
+> node_repl diagnostics: {"kernel_pid":17872,"kernel_status":"exited(code=1)","kernel_stderr_tail":"windows sandbox failed: helper_unknown_error: setup refresh had errors","reason":"stdout_eof","stream_error":null}
+> ```
+>
+> </details>
+>
+> The assignment page itself is not being served directly to the web reader, so I traced the course site to its public source and found the project brief there. I’m also trying a second local-read path because the workspace shell is currently failing before any command starts; no files have been changed.
+>
+> <details><summary>Searched the web</summary>
+>
+> Searched the web for `https://github.com/choyiny/cscc09.com/raw/refs/heads/main/src/content/coursework/project.md`
+>
+> </details>
+>
+> I’ve confirmed the current brief’s mandatory elements: Angular/React/Vue SPA, Express REST API, PostgreSQL, OAuth 2.0, fair complexity, plus capability evidence for authentication, UI/UX, real-time behavior, AI/tools, Stripe, architecture, and deployment. The source already shows the SPA/game/auth/Stripe/PostgreSQL pieces, but I’m checking the two areas most likely to affect a strict pass: whether “real-time” is actually implemented and whether the README/proposal contents satisfy the submission checklist.
+
+</details>
+
+I would not give a full “yes” yet. The application satisfies most core architecture requirements, but several requirements are either incomplete or not verifiable from the repository.
+
+The current brief is the [CSCC09 Group Project requirements](https://cscc09.com/work/project).
+
+| Requirement                 | Assessment                                                                                                                                                        |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Angular/React/Vue SPA       | Satisfied. Angular frontend exists in [`frontend/src`](./frontend/src)                                                                                            |
+| Express REST API            | Satisfied by [`app.js`](./app.js:42) and the routers                                                                                                              |
+| PostgreSQL primary database | Satisfied; Sequelize uses PostgreSQL                                                                                                                              |
+| OAuth 2.0                   | Satisfied; Google OAuth is implemented in [`authBillingRouter.js`](./routers/authBillingRouter.js:183)                                                            |
+| Fair complexity             | Satisfied; the project includes gameplay, Mapillary, Leaflet, AI, OAuth, Stripe, subscriptions, and PostgreSQL                                                    |
+| Authentication/security     | Mostly satisfied. HTTP-only JWT cookies, backend route protection, and Stripe webhook verification are present                                                    |
+| Stripe subscriptions        | Mostly satisfied. Checkout, webhooks, cancellation handling, and subscription gating are implemented                                                              |
+| AI integration              | Partially satisfied. Gemini analyzes Mapillary imagery for hints and reviews, but there is no explicit MCP/tool orchestration                                     |
+| Real-time enablement        | Not clearly satisfied. I found no WebRTC, WebSocket, SSE, or similar implementation. The app updates through ordinary HTTP requests and Angular state changes     |
+| Proposal README             | Incomplete. [`README.md`](./README.md:13) lists names and usernames, but not clearly the required uTORIDs, AI-policy pledges, or a dedicated AI-assistant summary |
+| Feedback requirement        | Not verifiable from the repository; there is no evidence of feedback from two outside students or addressed feedback                                              |
+| Deployment                  | Deferred as requested                                                                                                                                             |
+
+Two important implementation mismatches remain:
+
+1. The brief says users should purchase a subscription before login. Your current flow logs users in first, creates a `pending_payment` account, and then asks them to subscribe. This may be marked as acceptable depending on the instructor’s interpretation, but it does not exactly match the wording.
+
+2. The README says WebRTC will be used “if needed,” but the code does not implement WebRTC or another dedicated real-time technology. This is the largest likely requirements gap.
+
+Verification is also incomplete: I did not modify anything, and I did not run the Angular build or tests. The only frontend test currently checks that the root component can be created in [`app.spec.ts`](./frontend/src/app/app.spec.ts:1). The existing working-tree changes to `README.md`, `Caddyfile`, and the old `static` files were pre-existing.
+
+Overall: the application is architecturally close, but I would treat it as “mostly satisfies the requirements, with real-time capability and proposal/process documentation still needing attention,” rather than fully complete.
+
+> could we modify the codebase to have real-time enablement? If so, do not modify the codebase, please leave clear instructions and code below and i will include it myself.
+
+<details><summary>1 previous message</summary>
+
+> Yes. I recommend adding Server-Sent Events (SSE) to this app: it gives the browser a persistent server-to-client stream, requires no new library, works with your existing HTTP-only authentication, and fits GeoGuesser’s need to push game/round updates. I’ll inspect the active Angular game service and Express routes, then give you exact manual edits only.
+
+</details>
+
+Yes. The cleanest fit is Server-Sent Events (SSE): the Express server can push game updates to Angular without a page reload, with no new dependency. This is more appropriate than WebRTC for server-driven game events.
+
+I did not modify the codebase.
+
+### 1. Create this file
+
+File: `\\wsl.localhost\Ubuntu\home\spambuddy\cscc09\project-geoguesser\utility\realtime.js`
+
+```js
+const clientsByUserId = new Map();
+
+function userKey(userId) {
+  return String(userId);
+}
+
+export function registerRealtimeClient(userId, res) {
+  const key = userKey(userId);
+  const clients = clientsByUserId.get(key) ?? new Set();
+
+  clients.add(res);
+  clientsByUserId.set(key, clients);
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
+
+  let heartbeat = null;
+  let cleanedUp = false;
+
+  function cleanup() {
+    if (cleanedUp) return;
+
+    cleanedUp = true;
+
+    if (heartbeat) {
+      clearInterval(heartbeat);
+    }
+
+    clients.delete(res);
+
+    if (clients.size === 0) {
+      clientsByUserId.delete(key);
+    }
+  }
+
+  function writeEvent(eventName, payload) {
+    if (res.writableEnded || res.destroyed) {
+      cleanup();
+      return;
+    }
+
+    try {
+      res.write(`event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`);
+    } catch {
+      cleanup();
+    }
+  }
+
+  res.on("close", cleanup);
+  res.on("error", cleanup);
+
+  writeEvent("connected", { connected: true });
+
+  heartbeat = setInterval(() => {
+    writeEvent("heartbeat", {});
+  }, 25000);
+}
+
+export function broadcastToUser(userId, eventName, payload) {
+  const key = userKey(userId);
+  const clients = clientsByUserId.get(key);
+
+  if (!clients) return;
+
+  const message =
+    `event: ${eventName}\n` + `data: ${JSON.stringify(payload)}\n\n`;
+
+  for (const res of clients) {
+    try {
+      if (res.writableEnded || res.destroyed) {
+        clients.delete(res);
+        continue;
+      }
+
+      res.write(message);
+    } catch {
+      clients.delete(res);
+      res.destroy?.();
+    }
+  }
+
+  if (clients.size === 0) {
+    clientsByUserId.delete(key);
+  }
+}
+```
+
+### 2. Add the authenticated SSE route
+
+In [`authBillingRouter.js`](./routers/authBillingRouter.js), add:
+
+```js
+import { registerRealtimeClient } from "../utility/realtime.js";
+```
+
+After `requireActiveSubscription` is defined, add:
+
+```js
+router.get(
+  "/api/realtime",
+  authenticateToken,
+  requireActiveSubscription,
+  (req, res) => {
+    registerRealtimeClient(req.user.userId, res);
+  },
+);
+```
+
+This ensures only authenticated users with active subscriptions receive live updates.
+
+### 3. Broadcast game events
+
+In [`gameRouter.js`](./routers/gameRouter.js), add:
+
+```js
+import { broadcastToUser } from "../utility/realtime.js";
+```
+
+After the `/start` transaction finishes, before `return res.json(result);`, add:
+
+```js
+broadcastToUser(userId, "game.state", {
+  gameId: result.gameId,
+  round: result,
+});
+```
+
+After the guess transaction finishes, before `return res.json(result);`, add:
+
+```js
+broadcastToUser(user.userId, "game.guess-submitted", {
+  gameId,
+  roundId,
+  result,
+});
+```
+
+### 4. Create the Angular realtime service
+
+File: `\\wsl.localhost\Ubuntu\home\spambuddy\cscc09\project-geoguesser\frontend\src\app\services\realtime.service.ts`
+
+```ts
+import { Injectable, NgZone, inject, signal } from "@angular/core";
+import { Subject } from "rxjs";
+
+import { GuessSubmissionResponse, RoundState } from "../models/game.models";
+
+export interface GameStateEvent {
+  type: "game.state";
+  payload: {
+    gameId: number;
+    round: RoundState;
+  };
+}
+
+export interface GameGuessSubmittedEvent {
+  type: "game.guess-submitted";
+  payload: {
+    gameId: number;
+    roundId: number;
+    result: GuessSubmissionResponse;
+  };
+}
+
+export type GameRealtimeEvent = GameStateEvent | GameGuessSubmittedEvent;
+
+@Injectable({
+  providedIn: "root",
+})
+export class RealtimeService {
+  private readonly zone = inject(NgZone);
+  private readonly eventSubject = new Subject<GameRealtimeEvent>();
+
+  readonly events = this.eventSubject.asObservable();
+  readonly connected = signal(false);
+
+  private source: EventSource | null = null;
+
+  connect(): void {
+    if (this.source) {
+      return;
+    }
+
+    const source = new EventSource("/api/realtime");
+    this.source = source;
+
+    source.onopen = () => {
+      this.zone.run(() => {
+        this.connected.set(true);
+      });
+    };
+
+    source.onerror = () => {
+      this.zone.run(() => {
+        this.connected.set(false);
+      });
+    };
+
+    this.listen("game.state");
+    this.listen("game.guess-submitted");
+  }
+
+  disconnect(): void {
+    this.source?.close();
+    this.source = null;
+    this.connected.set(false);
+  }
+
+  private listen(eventType: GameRealtimeEvent["type"]): void {
+    this.source?.addEventListener(eventType, (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent).data);
+
+        this.zone.run(() => {
+          this.eventSubject.next({
+            type: eventType,
+            payload,
+          } as GameRealtimeEvent);
+        });
+      } catch {
+        // Ignore malformed events.
+      }
+    });
+  }
+}
+```
+
+### 5. Connect it to the game board
+
+In [`game-board.ts`](./frontend/src/app/components/game-board/game-board.ts), add imports:
+
+```ts
+import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
+import {
+  GameRealtimeEvent,
+  RealtimeService,
+} from "../../services/realtime.service";
+```
+
+Add these properties:
+
+```ts
+protected readonly realtime = inject(RealtimeService);
+protected readonly liveUpdate = signal<string | null>(null);
+```
+
+Add this constructor:
+
+```ts
+constructor() {
+  this.realtime.events
+    .pipe(takeUntilDestroyed())
+    .subscribe((event) => this.handleRealtimeEvent(event));
+}
+```
+
+At the start of `ngOnInit()`, connect to the stream:
+
+```ts
+ngOnInit(): void {
+  this.realtime.connect();
+
+  if (this.restoreSavedState()) {
+    return;
+  }
+
+  void this.game.startGame();
+}
+```
+
+Add this method to the component:
+
+```ts
+private handleRealtimeEvent(event: GameRealtimeEvent): void {
+  const currentRound = this.game.round();
+
+  if (event.type === 'game.state') {
+    if (
+      currentRound &&
+      currentRound.gameId !== event.payload.gameId
+    ) {
+      return;
+    }
+
+    this.liveUpdate.set('Game state updated live.');
+
+    if (this.phase() === 'playing' && !this.actionLoading()) {
+      this.game.setRound(event.payload.round);
+    }
+
+    return;
+  }
+
+  if (
+    !currentRound ||
+    currentRound.gameId !== event.payload.gameId
+  ) {
+    return;
+  }
+
+  this.liveUpdate.set(
+    'This game was updated live in another tab or device.',
+  );
+
+  if (this.phase() !== 'playing' || this.actionLoading()) {
+    return;
+  }
+
+  this.result.set(event.payload.result);
+  this.selectedGuess.set(null);
+  this.phase.set('result');
+  this.saveState();
+}
+```
+
+### 6. Disconnect on logout
+
+In [`app.ts`](./frontend/src/app/app.ts), import and inject the service:
+
+```ts
+import { RealtimeService } from "./services/realtime.service";
+```
+
+Add:
+
+```ts
+protected readonly realtime = inject(RealtimeService);
+```
+
+At the beginning of `logout()`:
+
+```ts
+async logout(): Promise<void> {
+  this.realtime.disconnect();
+
+  await this.auth.logout();
+
+  sessionStorage.removeItem('geoguesser.game-state');
+  this.game.clear();
+}
+```
+
+### 7. Show the live connection in the UI
+
+At the top of [`game-board.html`](./frontend/src/app/components/game-board/game-board.html), inside the `<section class="game-board">`, add:
+
+```html
+<div class="live-status" role="status" aria-live="polite">
+  @if (realtime.connected()) {
+  <span>Live updates connected</span>
+  } @else {
+  <span>Live updates reconnecting ...</span>
+  } @if (liveUpdate(); as message) {
+  <span>{{ message }}</span>
+  }
+</div>
+```
+
+Optional styling in `game-board.css`:
+
+```css
+.live-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  color: #475569;
+  font-size: 0.85rem;
+}
+```
+
+Your existing Angular proxy already covers `/api/**`, and Caddy should stream SSE without additional configuration.
+
+To test it, open the game in two browser tabs, confirm `/api/realtime` appears as `text/event-stream` in DevTools, then submit a guess in one tab. The other tab should receive the update and change to the round-result view without reloading.
+
+This gives you a concrete, defensible real-time capability: authenticated server events are pushed to connected Angular clients as the game changes.
+
+> can you expand on the server-sent-events to implement round updates, and game end updates? At the moment if I open two tabs and I guess on one, the result screen appears on both. However, once I press next round, it doesn't update on the other. Is this ok, or should we implement that as well?
+
+<details><summary>2 previous messages</summary>
+
+> What you have now is partially real-time: the guess mutation is broadcast, so both tabs receive the round result. The “Next Round” action is currently only a local Angular state change, which is why the second tab stays on the result screen. I’ll inspect your current SSE additions and give you the smallest manual changes needed to broadcast both next-round and game-complete state.
+>
+> Your diagnosis is correct. The server already creates the next round inside the guess request, but the Next Round button only changes `phase` and `game.round` in that one browser tab. The same applies to the final-score screen: `getScore()` is a local read followed by a local `phase = 'complete'`.
+>
+> For synchronized tabs, I recommend treating “advance round” and “finish game” as server-observable actions. I’m checking the current model types so the manual patches match your existing Angular contracts exactly.
+
+</details>
+
+Your current behavior is partially correct, but I recommend implementing synchronization for the Next Round and final-score actions too.
+
+The reason is that `/guess` is a server request, so it can broadcast an SSE event. However, `continueGame()` currently only changes Angular state locally. The server never knows that one tab pressed “Next Round.”
+
+Also, SSE is one-way. The button must make an HTTP request first; the server can then broadcast the resulting state to all tabs.
+
+## 1. Add new realtime event types
+
+In [`realtime.service.ts`](./frontend/src/app/services/realtime.service.ts), add:
+
+```ts
+export interface GameRoundAdvancedEvent {
+  type: "game.round-advanced";
+  payload: {
+    gameId: number;
+    round: RoundState;
+  };
+}
+
+export interface GameCompletedEvent {
+  type: "game.completed";
+  payload: {
+    gameId: number;
+    totalDistance: number;
+  };
+}
+```
+
+Update the union:
+
+```ts
+export type GameRealtimeEvent =
+  | GameStateEvent
+  | GameGuessSubmittedEvent
+  | GameRoundAdvancedEvent
+  | GameCompletedEvent;
+```
+
+Update `connect()`:
+
+```ts
+this.listen("game.state");
+this.listen("game.guess-submitted");
+this.listen("game.round-advanced");
+this.listen("game.completed");
+```
+
+## 2. Add a server-side advance-round endpoint
+
+In [`gameRouter.js`](./routers/gameRouter.js), add this route after the score route:
+
+```js
+gameRouter.post("/:gameId/rounds/:roundId/advance", async (req, res) => {
+  const gameId = Number(req.params.gameId);
+  const roundId = Number(req.params.roundId);
+  const userId = req.user.userId;
+
+  if (!Number.isInteger(gameId) || !Number.isInteger(roundId)) {
+    return res.status(400).json({
+      error: "Invalid gameId or roundId.",
+    });
+  }
+
+  try {
+    const completedRound = await Rounds.findOne({
+      where: {
+        gameId,
+        roundId,
+      },
+      include: [
+        {
+          model: Games,
+          as: "game",
+          attributes: ["gameId", "userId", "status"],
+          where: {
+            gameId,
+            userId,
+            status: "in_progress",
+          },
+        },
+      ],
+    });
+
+    if (!completedRound) {
+      return res.status(404).json({
+        error: "Active round was not found.",
+      });
+    }
+
+    const roundWasCompleted =
+      completedRound.guessLat !== null &&
+      completedRound.guessLng !== null &&
+      completedRound.distance !== null;
+
+    if (!roundWasCompleted) {
+      return res.status(409).json({
+        error: "The current round has not been completed yet.",
+      });
+    }
+
+    if (completedRound.roundNumber >= 3) {
+      return res.status(409).json({
+        error: "There is no next round.",
+      });
+    }
+
+    const nextRound = await Rounds.findOne({
+      where: {
+        gameId,
+        roundNumber: completedRound.roundNumber + 1,
+      },
+    });
+
+    if (!nextRound) {
+      return res.status(404).json({
+        error: "The next round was not found.",
+      });
+    }
+
+    const roundData = {
+      gameId: nextRound.gameId,
+      imageId: nextRound.imageId,
+      roundId: nextRound.roundId,
+      roundNumber: nextRound.roundNumber,
+    };
+
+    broadcastToUser(userId, "game.round-advanced", {
+      gameId,
+      round: roundData,
+    });
+
+    return res.json(roundData);
+  } catch (error) {
+    console.error("Unable to advance round:", error);
+
+    return res.status(500).json({
+      error: "Failed to advance round.",
+    });
+  }
+});
+```
+
+The database already creates the next round during `/guess`; this endpoint validates and announces that the user has moved to it.
+
+## 3. Broadcast final-score updates
+
+In the existing score route in [`gameRouter.js`](./routers/gameRouter.js), change:
+
+```js
+return res.json({ totalDistance });
+```
+
+to:
+
+```js
+broadcastToUser(req.user.userId, "game.completed", {
+  gameId,
+  totalDistance,
+});
+
+return res.json({ totalDistance });
+```
+
+## 4. Add `advanceRound()` to the Angular game service
+
+In [`game.service.ts`](./frontend/src/app/services/game.service.ts), add:
+
+```ts
+async advanceRound(
+  gameId: number,
+  roundId: number,
+): Promise<RoundState> {
+  try {
+    const response = await firstValueFrom(
+      this.http.post<RoundState>(
+        `/games/${gameId}/rounds/${roundId}/advance`,
+        {},
+      ),
+    );
+
+    if (
+      response.gameId === undefined ||
+      response.roundId === undefined ||
+      response.roundNumber === undefined ||
+      !response.imageId
+    ) {
+      throw new Error('The server returned incomplete next-round data');
+    }
+
+    return response;
+  } catch (error: unknown) {
+    throw new Error(this.getErrorMessage(error));
+  }
+}
+```
+
+## 5. Update `continueGame()`
+
+In [`game-board.ts`](./frontend/src/app/components/game-board/game-board.ts), replace `continueGame()` with:
+
+```ts
+protected async continueGame(): Promise<void> {
+  const response = this.result();
+  const currentRound = this.game.round();
+
+  if (!response || !currentRound || this.actionLoading()) {
+    return;
+  }
+
+  if (response.newRoundData) {
+    this.actionLoading.set(true);
+    this.actionError.set(null);
+
+    try {
+      const nextRound = await this.game.advanceRound(
+        currentRound.gameId,
+        currentRound.roundId,
+      );
+
+      this.resetRoundUi();
+      this.game.setRound(nextRound);
+      this.phase.set('playing');
+      this.clearSavedState();
+    } catch (error: unknown) {
+      this.actionError.set(this.getErrorMessage(error));
+    } finally {
+      this.actionLoading.set(false);
+    }
+
+    return;
+  }
+
+  await this.showFinalScore();
+}
+```
+
+## 6. Replace the realtime event handler
+
+Replace `handleRealtimeEvent()` in [`game-board.ts`](./frontend/src/app/components/game-board/game-board.ts) with:
+
+```ts
+private handleRealtimeEvent(event: GameRealtimeEvent): void {
+  const currentRound = this.game.round();
+
+  if (event.type === 'game.state') {
+    if (
+      currentRound &&
+      currentRound.gameId !== event.payload.gameId
+    ) {
+      return;
+    }
+
+    this.liveUpdate.set('Game state updated live.');
+
+    if (this.phase() === 'playing' && !this.actionLoading()) {
+      this.game.setRound(event.payload.round);
+    }
+
+    return;
+  }
+
+  if (
+    !currentRound ||
+    currentRound.gameId !== event.payload.gameId
+  ) {
+    return;
+  }
+
+  if (event.type === 'game.guess-submitted') {
+    this.liveUpdate.set(
+      'This game was updated live in another tab or device.',
+    );
+
+    if (this.phase() !== 'playing' || this.actionLoading()) {
+      return;
+    }
+
+    this.result.set(event.payload.result);
+    this.selectedGuess.set(null);
+    this.phase.set('result');
+    this.saveState();
+
+    return;
+  }
+
+  if (event.type === 'game.round-advanced') {
+    this.liveUpdate.set('Next round opened live.');
+
+    if (this.phase() !== 'result' || this.actionLoading()) {
+      return;
+    }
+
+    this.resetRoundUi();
+    this.game.setRound(event.payload.round);
+    this.phase.set('playing');
+    this.clearSavedState();
+
+    return;
+  }
+
+  if (event.type === 'game.completed') {
+    this.liveUpdate.set('Final score updated live.');
+
+    if (this.phase() !== 'result' || this.actionLoading()) {
+      return;
+    }
+
+    this.finalScore.set(event.payload.totalDistance);
+    this.phase.set('complete');
+    this.saveState();
+  }
+}
+```
+
+## Expected behavior
+
+After these changes:
+
+1. Tab A submits a guess.
+2. Both tabs show the round result.
+3. Tab A presses “Next Round.”
+4. Tab A calls the new `/advance` endpoint.
+5. The server broadcasts `game.round-advanced`.
+6. Both tabs display the next round.
+7. On round three, Tab A presses “See Final Score.”
+8. The score route broadcasts `game.completed`.
+9. Both tabs show the final-score screen.
+
+So, while your current behavior is acceptable as a partial demonstration, synchronizing these transitions is better if you want to claim that the game state is genuinely real-time across tabs.

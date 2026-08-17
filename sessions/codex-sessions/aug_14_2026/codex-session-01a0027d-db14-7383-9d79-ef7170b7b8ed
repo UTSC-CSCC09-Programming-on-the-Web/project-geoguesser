@@ -1,0 +1,293 @@
+# Plan Angular frontend migration
+
+> Ok, I have to convert my frontend and entire application to use angular for the front end.  Can you give me the overview of what I need to do?  Give me the big picture of what needs to happen.  We will implement it shortly.
+>
+> Do not modify the code base. Leave code changes here and I will modify it myself.
+
+<details><summary>1 previous message</summary>
+
+> I’ll first map the current application boundaries—backend, database, routes, and existing frontend entry points—then I’ll translate that into a phased Angular migration plan without changing any files.
+</details>
+
+Yes. The big-picture change is:
+
+> Replace the current static HTML/vanilla JavaScript frontend with an Angular single-page application, while keeping Express, PostgreSQL, authentication, Stripe, Mapillary, and Gemini as the backend.
+
+Angular does not replace the backend. It becomes a structured client that communicates with your existing API.
+
+## Current architecture
+
+Your application currently has:
+
+- Express serving the frontend from `static/`
+- Vanilla JavaScript in:
+
+  - [`static/index.html`](<./static/index.html>)
+  - [`static/js/auth.js`](<./static/js/auth.js>)
+  - [`static/js/guess_map.js`](<./static/js/guess_map.js>)
+  - [`static/js/main.js`](<./static/js/main.js>)
+
+- Express API routes in:
+
+  - [`routers/authBillingRouter.js`](<./routers/authBillingRouter.js>)
+  - [`routers/gameRouter.js`](<./routers/gameRouter.js>)
+  - [`routers/streetviewRouter.js`](<./routers/streetviewRouter.js>)
+
+- PostgreSQL and Sequelize for persistence
+- Mapillary for Street View
+- Leaflet for the guessing and result maps
+- Google OAuth and Stripe subscriptions
+- Gemini for hints and AI reviews
+
+## Target architecture
+
+The target flow should look like this:
+
+```text
+Angular browser application
+        |
+        | HTTP requests and authentication cookies
+        v
+Express API server
+        |
+        +-- PostgreSQL / Sequelize
+        +-- Mapillary
+        +-- Gemini
+        +-- Stripe
+        +-- Google OAuth
+```
+
+The Angular app should own UI state and presentation. Express should continue owning authentication, authorization, game rules, database operations, and secret API keys.
+
+## Main migration phases
+
+### 1. Establish the API contract
+
+Before writing Angular components, document the existing API responses and request bodies.
+
+The active frontend flow currently uses endpoints such as:
+
+- `GET /api/me`
+- `GET /auth/google`
+- `GET /auth/logout`
+- `POST /api/create-checkout-session`
+- `GET /api/checkout/confirm`
+- `POST /games/start`
+- `POST /games/:gameId/rounds/:roundId/guess`
+- `GET /games/:gameId/score`
+- `GET /streetview/access-token`
+- `POST /streetview/ai-review`
+
+The backend should remain the source of truth for whether a user is authenticated, subscribed, allowed to play, and allowed to submit guesses.
+
+### 2. Create a separate Angular frontend
+
+Create an Angular application, probably in a directory such as:
+
+```text
+frontend/
+```
+
+The Angular project will contain:
+
+- TypeScript instead of global JavaScript variables
+- Angular components instead of manually edited DOM elements
+- Angular services for API communication
+- Angular templates for conditional UI
+- Angular routing if you later add multiple pages
+- Angular environment configuration for development and production
+
+During development, Angular should proxy API requests to Express so the browser can continue using relative paths such as `/games/start`.
+
+### 3. Convert global frontend state into Angular state
+
+The current frontend stores state in variables such as:
+
+- `window.gameId`
+- `window.imageId`
+- `window.roundId`
+- `window.roundNumber`
+- `currentGuess`
+- `pendingRoundData`
+- `gameplayEnabled`
+- `window.streetviewViewer`
+
+These should become explicit Angular state, probably managed through services and signals or observable state.
+
+You will need clear states for:
+
+- Checking authentication
+- Logged out
+- Logged in but unsubscribed
+- Loading a game
+- Playing a round
+- Submitting a guess
+- Viewing round results
+- Loading AI hint/review
+- Playing the next round
+- Game over
+- Starting another game
+- API or external-service errors
+
+This is one of the most important parts of the migration. Angular should manage state transitions instead of relying on manually hiding and showing DOM sections.
+
+### 4. Break the interface into components
+
+A reasonable component structure would be:
+
+```text
+AppComponent
+├── HeaderComponent
+│   ├── AuthStatusComponent
+│   └── SubscriptionControlsComponent
+├── AccessGateComponent
+├── GameComponent
+│   ├── StreetviewComponent
+│   ├── GuessMapComponent
+│   ├── HintComponent
+│   └── RoundResultComponent
+│       ├── StreetviewReviewComponent
+│       ├── AiReviewComponent
+│       └── ResultMapComponent
+├── GameOverComponent
+└── FooterComponent
+```
+
+The current UI hierarchy can remain the same:
+
+- Street View and AI review on the left
+- Result map and details on the right
+- Action buttons underneath
+- Responsive stacking on smaller screens
+
+Angular changes how the UI is controlled, not necessarily how it looks.
+
+### 5. Create frontend services
+
+Instead of calling `fetch()` directly from multiple files, create centralized services such as:
+
+- `AuthService`
+  - Load current user
+  - Log in
+  - Log out
+  - Start checkout
+  - Confirm checkout
+  - Track subscription status
+
+- `GameService`
+  - Start or resume a game
+  - Submit a guess
+  - Fetch final score
+
+- `StreetviewService`
+  - Get the Mapillary access token
+  - Load or change the current image
+  - Request AI hints and reviews
+
+- `MapService` or map-specific services
+  - Initialize Leaflet maps
+  - Add and remove markers
+  - Draw the result line
+  - Destroy map instances when necessary
+
+You may also create an HTTP interceptor for consistent error handling and authentication behavior.
+
+### 6. Integrate Mapillary and Leaflet carefully
+
+These libraries manipulate the DOM directly, so they must be integrated through Angular lifecycle methods.
+
+Typical responsibilities:
+
+- Initialize maps in `ngAfterViewInit`
+- Use `ElementRef` or template references for map containers
+- Resize maps after they become visible
+- Destroy Leaflet and Mapillary instances in `ngOnDestroy`
+- Avoid repeatedly creating duplicate map instances
+
+The current implementation physically moves the Mapillary container between the game area and results area. In Angular, it would be safer to keep one Street View component alive and change its layout or visibility rather than manually moving DOM nodes.
+
+This prevents problems with:
+
+- Destroyed viewers
+- Blank Mapillary panels
+- Stale map dimensions
+- Duplicate event handlers
+- Lost viewer state
+
+### 7. Rebuild authentication and subscription gating
+
+The Angular frontend should display the proper UI based on authentication state:
+
+- Logged out: show Google login
+- Logged in without subscription: show subscription option and lock gameplay
+- Active subscription: unlock gameplay
+- Logout: clear the UI state and return to the locked state
+
+The backend cookie-based authentication can remain. If Angular and Express are served from the same origin in production, this will be simpler.
+
+If Angular runs on a separate origin, you will need to account for:
+
+- CORS
+- `withCredentials`
+- Cookie settings
+- OAuth redirect URLs
+- Stripe success and cancellation URLs
+
+Do not move Google, Stripe, Gemini, or other secret credentials into Angular.
+
+### 8. Decide how production will serve Angular
+
+The simplest deployment approach is to keep one public origin:
+
+```text
+Caddy
+  -> Express
+       -> Angular compiled files
+       -> API routes
+```
+
+The Angular production build would be copied into the application image, and Express would serve the compiled Angular files.
+
+Your existing Docker and Caddy setup in [`compose.yaml`](<./compose.yaml>), [`Dockerfile`](<./Dockerfile>), and [`Caddyfile`](<./Caddyfile>) would then need to account for the Angular build output.
+
+You will also need an SPA fallback so direct navigation to Angular routes does not produce a 404.
+
+## Recommended implementation order
+
+1. Document and verify the existing API response shapes.
+2. Scaffold the Angular project.
+3. Add development proxying to Express.
+4. Build the Angular shell and header.
+5. Implement authentication and subscription state.
+6. Implement the access gate.
+7. Implement game start and round state.
+8. Integrate the Mapillary Street View component.
+9. Integrate the Leaflet guessing map.
+10. Implement guess submission and round results.
+11. Implement AI hints and AI reviews.
+12. Implement final score and “Play Again.”
+13. Test refreshes, errors, authentication, and all three rounds.
+14. Build Angular for production.
+15. Serve the Angular build through the existing deployment.
+16. Remove the old static frontend only after Angular has feature parity.
+
+## Definition of done
+
+The migration is complete when Angular can successfully handle:
+
+- Google login and logout
+- Subscription gating
+- Starting and resuming games
+- Loading Mapillary images
+- Selecting a Leaflet guess
+- Submitting guesses
+- Displaying distance and actual location
+- Showing the result map
+- Generating hints and AI reviews
+- Moving between all three rounds
+- Showing the final score
+- Starting another game
+- Refreshing the page without corrupting game state
+- Handling API, authentication, Mapillary, Gemini, and Stripe errors
+
+The backend and database should not need a fundamental rewrite. The main work is converting the current DOM-driven frontend into a typed, state-driven Angular client while preserving the existing API behavior.

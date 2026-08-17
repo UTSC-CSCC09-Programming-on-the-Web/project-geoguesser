@@ -1,0 +1,1149 @@
+# Add Docker Caddy deployment guide
+
+> Ok. Can you help me write the Docker and Docker compose files for deployment? You do not need to use the pre-existing docker files at all. I want to also use Caddy for https enablement.
+>
+> I am going to copy all of my project files to a VM at ip 99.79.152.126.
+>
+> Other than copying the files over, can you provide clear and explicit step-by-step instructions on how to set up the VM to use the Docker and docker compose files to deploy my application?
+>
+> I already have a DNS with geoguessing.me pointing to my VM.
+>
+> Please do not modify the codebase. Instead provide clear code and instructions on how to change the code and I will do so manually.
+
+<details><summary>4 previous messages</summary>
+
+> I’ll keep this read-only: first I’ll inspect the app’s runtime, ports, static assets, and environment variables, then I’ll give you pasteable `Dockerfile`/`docker-compose.yml`/Caddy configuration plus a VM deployment checklist. I’ll also account for the existing GeoGuesser deployment notes, including the credential-rotation and verification gaps.
+>
+> The first read confirmed the app is an Angular frontend served by Express, with PostgreSQL/Sequelize, Google OAuth, Stripe, Mapillary, and protected `/games`/`/streetview` routes. The shell had a transient process-setup failure while listing files; I’m retrying with narrower reads so I don’t mistake tooling failure for an application result.
+>
+> The runtime details are now clear: the root process is `node bootstrap.js`, the frontend build output is `frontend/dist/frontend/browser`, the app listens on port `3000`, and it needs a PostgreSQL service reachable as `postgres:5432`. I’m checking the current Docker/Caddy guidance before I finalize the VM commands, especially automatic certificate issuance and Compose startup ordering.
+>
+> <details><summary>Searched the web</summary>
+>
+> Searched the web for `site:docs.docker.com/engine/install/ubuntu Docker Engine install Ubuntu official ...`
+>
+> Searched the web for `site:caddyserver.com/docs/running container Docker Caddy /data /config official ...`
+>
+> </details>
+
+</details>
+
+Yes. I inspected the project without modifying it. The deployment should use:
+
+- Angular build stage
+- Express/Node production container
+- PostgreSQL container with persistent storage
+- Caddy container for HTTPS
+- Only ports `80` and `443` exposed publicly
+
+Caddy will automatically request and renew HTTPS certificates when the domain points to the VM and ports `80`/`443` are reachable. [Caddy automatic HTTPS](https://caddyserver.com/docs/automatic-https)
+
+## 1. Create these files manually
+
+Create these files in the project root.
+
+### `Dockerfile.deploy`
+
+```dockerfile
+FROM node:22-bookworm-slim AS frontend-build
+
+WORKDIR /build/frontend
+
+COPY frontend/package*.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+FROM node:22-bookworm-slim AS app
+
+ENV NODE_ENV=production
+ENV PORT=3000
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+COPY . .
+
+COPY --from=frontend-build /build/frontend/dist ./frontend/dist
+
+USER node
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=5 \
+  CMD node -e "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+
+CMD ["node", "bootstrap.js"]
+```
+
+Your existing Express code serves the Angular output from:
+
+```text
+frontend/dist/frontend/browser
+```
+
+The Dockerfile preserves that path.
+
+### `.dockerignore`
+
+```text
+.git
+.gitignore
+.env
+.env.*
+node_modules
+frontend/node_modules
+frontend/dist
+dist
+sessions
+.agents
+.codex
+Dockerfile*
+docker-compose*
+caddy
+README.md
+```
+
+Do not exclude any application source directories such as `database`, `routers`, `frontend/src`, or `frontend/public`.
+
+### `docker-compose.production.yml`
+
+```yaml
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${DB_NAME:?DB_NAME is required}
+      POSTGRES_USER: ${DB_USER:?DB_USER is required}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.deploy
+
+    restart: unless-stopped
+
+    env_file:
+      - .env.production
+
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+
+    expose:
+      - "3000"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      - ./caddy:/etc/caddy:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+```
+
+The PostgreSQL healthcheck prevents the application from starting before PostgreSQL is ready. This is the recommended Compose pattern for database dependencies. [Docker Compose startup ordering](https://docs.docker.com/compose/how-tos/startup-order/)
+
+### `caddy/Caddyfile`
+
+Create a `caddy` directory, then create this file inside it:
+
+```text
+geoguessing.me {
+    encode gzip zstd
+
+    reverse_proxy app:3000
+}
+```
+
+Do not use `localhost:3000` in the Caddyfile. Inside Docker, `localhost` means the Caddy container itself. `app:3000` refers to the Express container.
+
+The Caddy data and configuration volumes are important because Caddy stores certificates and TLS state in `/data`. [Caddy Docker image documentation](https://hub.docker.com/_/caddy)
+
+### `.env.production`
+
+Create this file manually on the VM. Do not commit it or upload your existing local `.env`.
+
+```dotenv
+PORT=3000
+NODE_ENV=production
+
+DB_NAME=geoguesser
+DB_USER=geoguesser_app
+DB_PASSWORD=REPLACE_WITH_A_LONG_RANDOM_PASSWORD
+DB_HOST=postgres
+DB_PORT=5432
+
+MAPILLARY_ACCESS_TOKEN=REPLACE_WITH_MAPILLARY_TOKEN
+
+GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_API_KEY=REPLACE_WITH_GEMINI_KEY
+
+JWT_SECRET=REPLACE_WITH_A_LONG_RANDOM_SECRET
+
+FRONTEND_URL=https://geoguessing.me
+
+GOOGLE_CLIENT_ID=REPLACE_WITH_GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET=REPLACE_WITH_GOOGLE_CLIENT_SECRET
+GOOGLE_CALLBACK_URL=https://geoguessing.me/auth/google/callback
+
+STRIPE_SECRET_KEY=REPLACE_WITH_STRIPE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET=REPLACE_WITH_STRIPE_WEBHOOK_SECRET
+STRIPE_PRICE_ID=REPLACE_WITH_STRIPE_PRICE_ID
+```
+
+Generate safe random values on the VM with:
+
+```bash
+openssl rand -hex 32
+openssl rand -hex 64
+```
+
+Use the generated values for `DB_PASSWORD` and `JWT_SECRET`.
+
+## 2. Configure DNS
+
+Your existing DNS should have:
+
+```text
+geoguessing.me  A  99.79.152.126
+```
+
+Before starting Caddy, verify it:
+
+```bash
+dig +short geoguessing.me
+```
+
+It should return:
+
+```text
+99.79.152.126
+```
+
+If there is an incorrect `AAAA` record, remove it or update it. An incorrect IPv6 record can cause certificate issuance to fail.
+
+The Caddyfile intentionally does not include `www.geoguessing.me`. Add a separate `www` DNS record and Caddy hostname later if you want that alias.
+
+## 3. Configure Google OAuth
+
+In Google Cloud Console, add:
+
+```text
+Authorized JavaScript origin:
+https://geoguessing.me
+```
+
+```text
+Authorized redirect URI:
+https://geoguessing.me/auth/google/callback
+```
+
+The callback URL must exactly match `GOOGLE_CALLBACK_URL`.
+
+## 4. Configure Stripe
+
+Create or update the Stripe webhook endpoint:
+
+```text
+https://geoguessing.me/api/webhook
+```
+
+Enable the events your application handles, especially:
+
+```text
+checkout.session.completed
+customer.subscription.deleted
+```
+
+Copy the resulting webhook signing secret into:
+
+```dotenv
+STRIPE_WEBHOOK_SECRET=...
+```
+
+Also make sure your Stripe price ID is correct.
+
+Before deployment, rotate any credential-like Stripe key currently present in `README.md` or elsewhere in the repository. Do not upload your local `.env`.
+
+## 5. Prepare the VM
+
+The commands below assume Ubuntu 22.04 or Ubuntu 24.04.
+
+SSH into the VM:
+
+```bash
+ssh YOUR_VM_USERNAME@99.79.152.126
+```
+
+Update the VM:
+
+```bash
+sudo apt update
+sudo apt upgrade -y
+```
+
+Install Docker from Docker’s official repository:
+
+```bash
+sudo apt install -y ca-certificates curl
+
+sudo install -m 0755 -d /etc/apt/keyrings
+
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  -o /etc/apt/keyrings/docker.asc
+
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+echo \
+  "Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc" \
+  | sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null
+
+sudo apt update
+
+sudo apt install -y \
+  docker-ce \
+  docker-ce-cli \
+  containerd.io \
+  docker-buildx-plugin \
+  docker-compose-plugin
+```
+
+Docker officially recommends the Compose plugin, which uses the command `docker compose`, not the older `docker-compose` command. [Docker Ubuntu installation](https://docs.docker.com/engine/install/ubuntu/)
+
+Enable Docker:
+
+```bash
+sudo systemctl enable --now docker
+sudo docker run hello-world
+```
+
+Optionally allow your normal user to run Docker without `sudo`:
+
+```bash
+sudo usermod -aG docker "$USER"
+```
+
+Log out and reconnect:
+
+```bash
+exit
+ssh YOUR_VM_USERNAME@99.79.152.126
+```
+
+Verify:
+
+```bash
+docker --version
+docker compose version
+```
+
+## 6. Configure the VM firewall
+
+Allow SSH, HTTP, and HTTPS:
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw --force enable
+sudo ufw status
+```
+
+Also configure the VM provider’s network firewall/security group:
+
+```text
+TCP 22   only from your own IP if possible
+TCP 80   from anywhere
+TCP 443  from anywhere
+```
+
+Do not open these publicly:
+
+```text
+TCP 3000
+TCP 5432
+```
+
+The Compose file does not publish either of those ports.
+
+## 7. Copy the project to the VM
+
+Create a deployment directory:
+
+```bash
+sudo mkdir -p /opt/geoguesser
+sudo chown -R "$USER":"$USER" /opt/geoguesser
+```
+
+From your local machine, copy the project while excluding local dependencies, build output, and secrets:
+
+```bash
+rsync -az \
+  --exclude '.git' \
+  --exclude '.env' \
+  --exclude '.env.*' \
+  --exclude 'node_modules' \
+  --exclude 'frontend/node_modules' \
+  --exclude 'frontend/dist' \
+  ./ \
+  YOUR_VM_USERNAME@99.79.152.126:/opt/geoguesser/
+```
+
+Then return to the VM:
+
+```bash
+cd /opt/geoguesser
+```
+
+Create the Caddy directory if necessary:
+
+```bash
+mkdir -p caddy
+```
+
+Create `.env.production`:
+
+```bash
+nano .env.production
+```
+
+Paste the production environment variables from above, then protect the file:
+
+```bash
+chmod 600 .env.production
+```
+
+## 8. Validate the configuration
+
+Validate the Compose file:
+
+```bash
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  config -q
+```
+
+Validate Caddy:
+
+```bash
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  run --rm --no-deps caddy \
+  validate \
+  --config /etc/caddy/Caddyfile \
+  --adapter caddyfile
+```
+
+Build the application image:
+
+```bash
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  build --pull app
+```
+
+## 9. Start the deployment
+
+Start all services:
+
+```bash
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  up -d
+```
+
+Check the containers:
+
+```bash
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  ps
+```
+
+You should see:
+
+```text
+postgres   healthy
+app        healthy
+caddy      running
+```
+
+Review logs:
+
+```bash
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  logs --tail=100 postgres app caddy
+```
+
+The application’s existing startup code runs:
+
+```text
+sequelize.authenticate()
+sequelize.sync({ alter: true })
+```
+
+Therefore, a new PostgreSQL volume should be initialized automatically by the application. Do not use `docker compose down -v` unless you intentionally want to delete the database volume.
+
+## 10. Test HTTPS
+
+From the VM:
+
+```bash
+curl -I http://geoguessing.me
+```
+
+The HTTP request should redirect to HTTPS.
+
+Then:
+
+```bash
+curl -I https://geoguessing.me
+```
+
+The HTTPS request should return a successful response.
+
+Test the unauthenticated API:
+
+```bash
+curl -i https://geoguessing.me/api/me
+```
+
+A `401 Unauthorized` response is expected because there is no login cookie.
+
+Then open:
+
+```text
+https://geoguessing.me
+```
+
+Test:
+
+1. The Angular page loads.
+2. Google login redirects correctly.
+3. The callback returns to `https://geoguessing.me`.
+4. The login cookie is created.
+5. Subscription checkout redirects correctly.
+6. Stripe webhook delivery succeeds.
+7. A subscribed user can access the game.
+8. An unauthenticated user cannot access protected routes.
+
+## 11. Updating the deployment later
+
+After copying updated source files:
+
+```bash
+cd /opt/geoguesser
+
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  build app
+
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  up -d app
+```
+
+If the Caddyfile changes:
+
+```bash
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  exec -w /etc/caddy caddy \
+  caddy reload \
+  --config /etc/caddy/Caddyfile \
+  --adapter caddyfile
+```
+
+If the deployment needs to be stopped temporarily:
+
+```bash
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  down
+```
+
+This stops the containers but preserves PostgreSQL data because the named volume remains.
+
+## 12. Back up PostgreSQL
+
+Before significant changes, create a backup:
+
+```bash
+cd /opt/geoguesser
+
+set -a
+. ./.env.production
+set +a
+
+mkdir -p backups
+
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  exec -T postgres \
+  pg_dump -U "$DB_USER" -d "$DB_NAME" \
+  | gzip > "backups/geoguesser-$(date +%Y-%m-%d-%H%M%S).sql.gz"
+```
+
+One final application check: production frontend requests should use relative URLs such as `/api/me`, not `http://localhost:3000/api/me`. The Angular proxy is for local development only; in production, Caddy and Express serve everything under the same HTTPS domain.
+
+> Another person in my group was in charge of writing the code for Google OAuth. Can I still configure Google OAuth myself so it'll work?
+>
+> If so, can you give me the exact instructions I have to follow to configure google oauth myself? I'm on google cloud console but I'm a bit confused where to add everything
+
+<details><summary>2 previous messages</summary>
+
+> Yes—if the code already contains the Google OAuth strategy and callback route, you can configure the Google Cloud side yourself without rewriting the OAuth code. I’ll verify the exact callback path and environment-variable names in this checkout, then map them to the current Google Cloud Console screens so you can enter the values confidently.
+>
+> <details><summary>Searched the web</summary>
+>
+> Searched the web for `site:developers.google.com/identity/protocols/oauth2/web-server Google OAuth web server redirect URI authorized redirect URIs ...`
+>
+> Searched the web for `site:support.google.com/cloud Google Auth Platform Branding Audience Clients create OAuth client web application 2026 ...`
+>
+> </details>
+
+</details>
+
+Yes. Your code already contains the Google OAuth implementation, so you only need to configure:
+
+1. A Google Cloud OAuth client.
+2. The correct environment variables.
+3. Your production HTTPS callback URL.
+
+The relevant code reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_URL`, then registers these routes:
+
+```text
+/auth/google
+/auth/google/callback
+```
+
+Your code requests only Google `profile` and `email` information.
+
+## 1. Get access to the Google Cloud project
+
+You have two options:
+
+- Use your group member’s existing Google Cloud project. They must grant your Google account access to that project.
+- Create your own Google Cloud project and create a new OAuth client there.
+
+For a group project, using the existing project is usually easiest. Ask the project owner to add your Google account through:
+
+```text
+Google Cloud Console
+→ IAM & Admin
+→ IAM
+→ Grant access
+```
+
+You need permission to configure Google Auth Platform and create OAuth clients.
+
+## 2. Open Google Auth Platform
+
+Go to:
+
+[Google Cloud Console](https://console.cloud.google.com/)
+
+Then:
+
+```text
+Select the correct project
+→ Google Auth Platform
+→ Overview
+→ Get started
+```
+
+Google’s newer interface calls this “Google Auth Platform.” Older projects may show equivalent options under:
+
+```text
+APIs & Services
+→ OAuth consent screen
+APIs & Services
+→ Credentials
+```
+
+## 3. Configure Branding
+
+Open:
+
+```text
+Google Auth Platform
+→ Branding
+```
+
+Enter values similar to these:
+
+```text
+App name:
+GeoGuesser
+
+User support email:
+your email address
+
+Developer contact email:
+your email address
+```
+
+Under authorized domains, add:
+
+```text
+geoguessing.me
+```
+
+For the homepage, use:
+
+```text
+https://geoguessing.me
+```
+
+If you have privacy-policy and terms-of-service pages, add them as well.
+
+Google requires production apps to use verified domains and may require homepage/privacy-policy information for verification. [Google OAuth branding requirements](https://support.google.com/cloud/answer/15549049)
+
+If Google asks you to verify ownership of `geoguessing.me`, use Google Search Console and add the requested DNS TXT record to your domain.
+
+## 4. Configure the audience
+
+Open:
+
+```text
+Google Auth Platform
+→ Audience
+```
+
+Choose:
+
+```text
+User type:
+External
+```
+
+Use `External` if people outside your school or organization need to log in.
+
+For initial testing, leave the app in:
+
+```text
+Publishing status:
+Testing
+```
+
+Then add your Google account and your group members under:
+
+```text
+Test users
+```
+
+Every person who tests the application should be added there.
+
+Google currently limits testing-mode apps to up to 100 test users. [Google app audience documentation](https://support.google.com/cloud/answer/15549945)
+
+## 5. Configure the requested data access
+
+Open:
+
+```text
+Google Auth Platform
+→ Data access
+```
+
+Add only the basic sign-in scopes:
+
+```text
+Email
+Profile
+```
+
+Do not add Google Drive, Gmail, Calendar, Sheets, or other scopes. Your current code does not request them.
+
+If Google displays the underlying scope names, they may appear as:
+
+```text
+https://www.googleapis.com/auth/userinfo.email
+https://www.googleapis.com/auth/userinfo.profile
+```
+
+If Google automatically includes `openid` as part of its sign-in configuration, that is acceptable. Do not manually add unrelated scopes.
+
+## 6. Create the OAuth client
+
+Open:
+
+```text
+Google Auth Platform
+→ Clients
+→ Create client
+```
+
+Choose:
+
+```text
+Application type:
+Web application
+```
+
+Use a name such as:
+
+```text
+GeoGuesser Production
+```
+
+Under **Authorized JavaScript origins**, add exactly:
+
+```text
+https://geoguessing.me
+```
+
+Under **Authorized redirect URIs**, add exactly:
+
+```text
+https://geoguessing.me/auth/google/callback
+```
+
+Do not add a trailing slash.
+
+The callback URL must match the application’s configured URL exactly, including:
+
+- `https` versus `http`
+- capitalization
+- hostname
+- path
+- trailing slash
+
+Otherwise Google returns `redirect_uri_mismatch`. [Google OAuth redirect URI requirements](https://developers.google.com/identity/protocols/oauth2/web-server)
+
+Click **Create**.
+
+Copy both values immediately:
+
+```text
+Client ID
+Client secret
+```
+
+Google now only shows the full client secret when it is created. Store it securely. [Google OAuth client documentation](https://support.google.com/cloud/answer/15549257)
+
+## 7. Put the values in your production environment file
+
+On the VM, edit:
+
+```bash
+nano /opt/geoguesser/.env.production
+```
+
+Set these values:
+
+```dotenv
+NODE_ENV=production
+
+FRONTEND_URL=https://geoguessing.me
+
+GOOGLE_CLIENT_ID=PASTE_YOUR_CLIENT_ID_HERE
+GOOGLE_CLIENT_SECRET=PASTE_YOUR_CLIENT_SECRET_HERE
+GOOGLE_CALLBACK_URL=https://geoguessing.me/auth/google/callback
+```
+
+Do not put the client secret in JavaScript source code, Git, the README, or the Angular frontend.
+
+Protect the file:
+
+```bash
+chmod 600 /opt/geoguesser/.env.production
+```
+
+## 8. Recreate the application container
+
+Changing `.env.production` does not update an already-running container automatically. Run:
+
+```bash
+cd /opt/geoguesser
+
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  up -d --force-recreate app
+```
+
+Check the application logs:
+
+```bash
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  logs --tail=100 app
+```
+
+You should not see:
+
+```text
+Google OAuth is not configured
+```
+
+You can verify the non-secret values inside the container:
+
+```bash
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  exec app sh -lc \
+  'env | grep -E "^(NODE_ENV|FRONTEND_URL|GOOGLE_CLIENT_ID|GOOGLE_CALLBACK_URL)="'
+```
+
+## 9. Test the OAuth start route
+
+Run:
+
+```bash
+curl -sS -D - -o /dev/null https://geoguessing.me/auth/google
+```
+
+You should receive a `302` redirect to a Google Accounts URL.
+
+Then open this in your browser:
+
+```text
+https://geoguessing.me/auth/google
+```
+
+Complete the Google login. Google should redirect back to:
+
+```text
+https://geoguessing.me/auth/google/callback
+```
+
+The application should then redirect to:
+
+```text
+https://geoguessing.me
+```
+
+## Common errors
+
+### `redirect_uri_mismatch`
+
+Make sure both places contain exactly:
+
+```text
+https://geoguessing.me/auth/google/callback
+```
+
+It must match:
+
+```dotenv
+GOOGLE_CALLBACK_URL=https://geoguessing.me/auth/google/callback
+```
+
+and the Google Cloud **Authorized redirect URI**.
+
+### `Google OAuth is not configured`
+
+One or more of these variables is missing inside the container:
+
+```dotenv
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+GOOGLE_CALLBACK_URL
+```
+
+Recreate the container with `--force-recreate`.
+
+### `invalid_client`
+
+The client ID or secret is wrong. If your teammate created the original client and cannot provide the secret, create a new client secret or create a new web client. Google supports rotating client secrets without changing the application code. [Google client-secret rotation](https://support.google.com/cloud/answer/15549257)
+
+### `Access blocked: This app’s request is invalid`
+
+Usually one of these is wrong:
+
+- The account is not listed as a test user.
+- The app is configured for the wrong audience.
+- The redirect URI is incorrect.
+- The OAuth client belongs to a different Google Cloud project than the configured credentials.
+
+### Login succeeds but the session does not persist
+
+Confirm that production contains:
+
+```dotenv
+NODE_ENV=production
+FRONTEND_URL=https://geoguessing.me
+```
+
+Your code marks the authentication cookie as secure in production, so the site must be accessed through HTTPS.
+
+> I successfully transferred the files over to the VM. Then I tried to validate Caddy using the code you provided:
+>
+> `docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  run --rm --no-deps caddy \
+  validate \
+  --config /etc/caddy/Caddyfile \
+  --adapter caddyfile`
+>
+> I got the following error:
+>
+> docker compose \
+>  --env-file .env.production \
+>  -f docker-compose.production.yml \
+>  run --rm --no-deps caddy \
+>  validate \
+>  --config /etc/caddy/Caddyfile \
+>  --adapter caddyfile
+> [+] 4/4te 4/4
+> ✔ Volume geoguessing3_postgres_data Created 0.0s
+> ✔ Volume geoguessing3_caddy_config Created 0.0s
+> ✔ Volume geoguessing3_caddy_data Created 0.0s
+> ✔ Network geoguessing3_default Created 0.2s
+> Image caddy:2-alpine Pulling
+> f8432a27d075 Pulling fs layer 0B
+> e6f31ffc071e Pulling fs layer 0B
+> 4f4fb700ef54 Pulling fs layer 0B
+> ee31d5a470f0 Pulling fs layer 0B
+> a0449c657909 Pulling fs layer 0B
+> f8432a27d075 Downloading 2.097MB
+> e6f31ffc071e Downloading 2.097MB
+> a0449c657909 Downloading 1.049MB
+> 4f4fb700ef54 Download complete 0B
+> f8432a27d075 Download complete 0B
+> e6f31ffc071e Download complete 0B
+> e6f31ffc071e Extracting 1B
+> a0449c657909 Downloading 4.194MB
+> ee31d5a470f0 Download complete 0B
+> e6f31ffc071e Extracting 1B
+> a0449c657909 Downloading 6.291MB
+> 7fccd04675d0 Download complete 0B
+> a39a20466be4 Download complete 0B
+> e6f31ffc071e Extracting 1B
+> a0449c657909 Downloading 10.49MB
+> e6f31ffc071e Extracting 1B
+> a0449c657909 Downloading 13.63MB
+> e6f31ffc071e Pull complete 0B
+> a0449c657909 Downloading 17.29MB
+> f8432a27d075 Extracting 1B
+> a0449c657909 Download complete 0B
+> f8432a27d075 Pull complete 0B
+> ee31d5a470f0 Pull complete 0B
+> a0449c657909 Extracting 1B
+> a0449c657909 Extracting 1B
+> a0449c657909 Extracting 1B
+> a0449c657909 Extracting 1B
+> 4f4fb700ef54 Pull complete 0B
+> a0449c657909 Pull complete 0B
+> Image caddy:2-alpine Pulled
+> Container geoguessing3-caddy-run-fb42f345421e Creating
+> Container geoguessing3-caddy-run-fb42f345421e Created
+> Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: exec: "validate": executable file not found in $PATH
+
+<details><summary>1 previous message</summary>
+
+> That error is from the validation command, not from your Caddyfile. The Caddy image is trying to execute `validate` as if it were a standalone Linux command; it needs the `caddy` executable explicitly. The image pulled successfully, and the created volumes/network are normal side effects of `docker compose run`.
+
+</details>
+
+The Caddy image downloaded correctly. The error is only because `validate` must be run through the `caddy` executable.
+
+Run this corrected command:
+
+```bash
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  run --rm --no-deps \
+  --entrypoint caddy \
+  caddy \
+  validate \
+  --config /etc/caddy/Caddyfile \
+  --adapter caddyfile
+```
+
+You should see:
+
+```text
+Valid configuration
+```
+
+The volumes and Docker network created during validation are normal and can remain.
+
+If validation succeeds, start the deployment:
+
+```bash
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  up -d
+```
+
+Then check the status:
+
+```bash
+docker compose \
+  --env-file .env.production \
+  -f docker-compose.production.yml \
+  ps
+```
+
+If validation instead reports that `/etc/caddy/Caddyfile` cannot be found, verify that your VM has:
+
+```bash
+ls -l caddy/Caddyfile
+```
+
+and that the Compose file contains:
+
+```yaml
+volumes:
+  - ./caddy:/etc/caddy:ro
+```

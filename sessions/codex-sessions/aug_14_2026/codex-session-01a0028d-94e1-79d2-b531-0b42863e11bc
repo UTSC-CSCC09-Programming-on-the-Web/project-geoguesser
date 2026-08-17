@@ -1,0 +1,621 @@
+# Start Angular frontend conversion
+
+> Ok, can we start converting the frontend into an angular build?
+>
+> I would like to break up doing this conversion into multiple steps. The outline you provided from before was:
+>
+> Recommended implementation order
+> Document and verify the existing API response shapes.
+> Scaffold the Angular project.
+> Add development proxying to Express.
+> Build the Angular shell and header.
+> Implement authentication and subscription state.
+> Implement the access gate.
+> Implement game start and round state.
+> Integrate the Mapillary Street View component.
+> Integrate the Leaflet guessing map.
+> Implement guess submission and round results.
+> Implement AI hints and AI reviews.
+> Implement final score and “Play Again.”
+> Test refreshes, errors, authentication, and all three rounds.
+> Build Angular for production.
+> Serve the Angular build through the existing deployment.
+> Remove the old static frontend only after Angular has feature parity.
+>
+> Can we do the first three steps?
+>
+> Please do not change the code base. Leave all intended changes below and clear instructions, and i will type the code out myself.
+
+<details><summary>5 previous messages</summary>
+
+> I’ll inspect the current Express API and frontend structure, plus the relevant project memory, and then give you a step-by-step, copyable plan for the first three stages. I will not modify any files.
+>
+> The checkout is a plain Express app serving `static/index.html` and three browser scripts (`auth.js`, `main.js`, and `guess_map.js`). I’m now tracing the route handlers and the actual client call sites so the Angular service contracts match what the backend really returns.
+>
+> The backend contracts are now clear enough to document. One important integration detail is that auth is cookie-based: Angular must call the API with same-origin relative URLs through a development proxy, so the browser keeps the `token` cookie without introducing CORS work. I’m checking the current Angular CLI proxy/scaffold syntax before I write the commands.
+>
+> <details><summary>Searched the web</summary>
+>
+> Searched the web for `site:angular.dev/tools/cli/setup-local Angular CLI ng new proxyConfig ng serve proxy-config ...`
+>
+> </details>
+>
+> The Angular proxy should cover all four backend namespaces used by the browser: `/api`, `/auth`, `/games`, and `/streetview`. I also confirmed the existing app already keeps Mapillary and Gemini credentials behind Express; the Angular client only receives the Mapillary viewer token and calls the AI endpoints through Express.
+</details>
+
+Yes. I inspected the current app and did not modify any files.
+
+## Step 1: Document and verify the existing API
+
+The backend remains Express on port `3000`. These are the frontend-relevant contracts.
+
+| Method | Endpoint | Success response |
+|---|---|---|
+| `GET` | `/api/me` | `{ user: { userId, email, username, subscriptionStatus } }` |
+| `POST` | `/api/create-checkout-session` | `{ url }` |
+| `GET` | `/api/checkout/confirm?session_id=...` | `{ status: "active" }` |
+| `GET` | `/auth/google` | Redirects to Google |
+| `GET` | `/auth/logout` | `{ error: "Logged out successfully" }` |
+| `POST` | `/games/start` | `{ gameId, imageId, roundId, roundNumber }` |
+| `POST` | `/games/:gameId/rounds/:roundId/guess` | `{ distance, guessLocation, actualLocation, newRoundData }` |
+| `GET` | `/games/:gameId/score` | `{ totalDistance }` |
+| `GET` | `/streetview/access-token` | `{ accessToken }` |
+| `POST` | `/streetview/ai-review` | `{ text }` |
+
+The guess request body is:
+
+```json
+{
+  "guessLat": 43.65,
+  "guessLng": -79.38
+}
+```
+
+The AI request body is:
+
+```json
+{
+  "imageId": "123456789",
+  "mode": "hint"
+}
+```
+
+`mode` may be `"hint"` or `"review"`.
+
+Most errors use:
+
+```json
+{
+  "error": "Description of the problem"
+}
+```
+
+Relevant source files:
+
+- [app.js](<./app.js:27>)
+- [authBillingRouter.js](<./routers/authBillingRouter.js:317>)
+- [gameRouter.js](<./routers/gameRouter.js:47>)
+- [streetviewRouter.js](<./routers/streetviewRouter.js:29>)
+- [main.js](<./static/js/main.js:5>)
+- [guess_map.js](<./static/js/guess_map.js:177>)
+
+For a quick unauthenticated backend check:
+
+```powershell
+curl.exe -i http://127.0.0.1:3000/api/me
+```
+
+Expected result: HTTP `401` with `{ "error": "Unauthorized" }`.
+
+## Step 2: Scaffold Angular
+
+From the repository root:
+
+```powershell
+npx @angular/cli@latest new frontend --routing --style=css --standalone --strict --ssr=false --skip-git --package-manager=npm --defaults
+```
+
+This creates a new, independent Angular app at:
+
+```text
+project-geoguesser/frontend/
+```
+
+The existing `static/` frontend remains untouched.
+
+Angular’s current CLI supports these workspace and application options through `ng new`. [Angular CLI `ng new` documentation](https://angular.dev/cli/new)
+
+Confirm the scaffold:
+
+```powershell
+cd frontend
+npm start
+```
+
+Open:
+
+```text
+http://localhost:4200
+```
+
+Stop the Angular server with `Ctrl+C` after confirming the starter page loads.
+
+## Step 3: Add the development proxy
+
+The proxy belongs to Angular’s development server. Express itself does not need to change.
+
+Create this file:
+
+```text
+frontend/src/proxy.conf.json
+```
+
+Paste:
+
+```json
+{
+  "/api/**": {
+    "target": "http://127.0.0.1:3000",
+    "secure": false
+  },
+  "/auth/**": {
+    "target": "http://127.0.0.1:3000",
+    "secure": false
+  },
+  "/games/**": {
+    "target": "http://127.0.0.1:3000",
+    "secure": false
+  },
+  "/streetview/**": {
+    "target": "http://127.0.0.1:3000",
+    "secure": false
+  }
+}
+```
+
+Then edit:
+
+```text
+frontend/angular.json
+```
+
+Inside the generated project’s `serve.options` object, add:
+
+```json
+"proxyConfig": "src/proxy.conf.json"
+```
+
+Alternatively, test without editing `angular.json`:
+
+```powershell
+npm start -- --proxy-config src/proxy.conf.json
+```
+
+Run the backend in one terminal from the repository root:
+
+```powershell
+npm run dev
+```
+
+Run Angular in another terminal:
+
+```powershell
+cd frontend
+npm start
+```
+
+Then test the proxy:
+
+```powershell
+curl.exe -i http://127.0.0.1:4200/api/me
+```
+
+It should return the same `401 Unauthorized` response as the direct Express request.
+
+Angular requires restarting `ng serve` after proxy configuration changes. [Angular development proxy documentation](https://angular.dev/tools/cli/serve)
+
+## Important local environment setting
+
+Because Angular runs on port `4200`, update your local `.env` value:
+
+```env
+FRONTEND_URL=http://localhost:4200
+```
+
+Keep the OAuth callback pointed at Express unless you intentionally reconfigure Google OAuth:
+
+```env
+GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
+```
+
+This preserves the existing cookie-based authentication flow while Angular communicates with Express through relative URLs.
+
+Acceptance criteria for these three steps:
+
+- `static/` is unchanged.
+- Angular loads at `http://localhost:4200`.
+- Express continues running at `http://localhost:3000`.
+- `/api`, `/auth`, `/games`, and `/streetview` proxy through Angular.
+- `/api/me` returns the same response through ports `3000` and `4200`.
+- No CORS configuration is needed.
+
+> Here is my frontend/angular.json file:
+>
+> `{
+>   "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
+>   "version": 1,
+>   "cli": {
+>     "packageManager": "npm"
+>   },
+>   "newProjectRoot": "projects",
+>   "projects": {
+>     "frontend": {
+>       "projectType": "application",
+>       "schematics": {},
+>       "root": "",
+>       "sourceRoot": "src",
+>       "prefix": "app",
+>       "architect": {
+>         "build": {
+>           "builder": "@angular/build:application",
+>           "options": {
+>             "browser": "src/main.ts",
+>             "tsConfig": "tsconfig.app.json",
+>             "assets": [
+>               {
+>                 "glob": "**/*",
+>                 "input": "public"
+>               }
+>             ],
+>             "styles": [
+>               "src/styles.css"
+>             ]
+>           },
+>           "configurations": {
+>             "production": {
+>               "budgets": [
+>                 {
+>                   "type": "initial",
+>                   "maximumWarning": "500kB",
+>                   "maximumError": "1MB"
+>                 },
+>                 {
+>                   "type": "anyComponentStyle",
+>                   "maximumWarning": "4kB",
+>                   "maximumError": "8kB"
+>                 }
+>               ],
+>               "outputHashing": "all"
+>             },
+>             "development": {
+>               "optimization": false,
+>               "extractLicenses": false,
+>               "sourceMap": true
+>             }
+>           },
+>           "defaultConfiguration": "production"
+>         },
+>         "serve": {
+>           "builder": "@angular/build:dev-server",
+>           "configurations": {
+>             "production": {
+>               "buildTarget": "frontend:build:production"
+>             },
+>             "development": {
+>               "buildTarget": "frontend:build:development"
+>             }
+>           },
+>           "defaultConfiguration": "development"
+>         },
+>         "test": {
+>           "builder": "@angular/build:unit-test"
+>         }
+>       }
+>     }
+>   }
+> } `
+>
+> I can't seem to find a serve.options object.  Where would I put the proxyConfig line?
+
+<details><summary>2 previous messages</summary>
+
+> Your `serve` target is using Angular’s newer `@angular/build:dev-server` builder. I’m confirming the exact placement for that generated structure, then I’ll show you the corrected block.
+>
+> <details><summary>Searched the web</summary>
+>
+> Searched the web for `https://angular.dev/tools/cli/serve`
+>
+> </details>
+</details>
+
+Put `options` directly inside the `serve` object, between `builder` and `configurations`:
+
+```json
+"serve": {
+  "builder": "@angular/build:dev-server",
+  "options": {
+    "proxyConfig": "src/proxy.conf.json"
+  },
+  "configurations": {
+    "production": {
+      "buildTarget": "frontend:build:production"
+    },
+    "development": {
+      "buildTarget": "frontend:build:development"
+    }
+  },
+  "defaultConfiguration": "development"
+}
+```
+
+Then create:
+
+```text
+frontend/src/proxy.conf.json
+```
+
+After saving both files, restart Angular:
+
+```powershell
+npm start
+```
+
+The path is relative to the `frontend` directory. Angular’s documentation shows this exact placement for `@angular/build:dev-server`. [Angular proxy configuration](https://angular.dev/tools/cli/serve)
+
+> Can you explain what all of this does? I'm a bit lost and confused.
+
+Absolutely. Think of this configuration as telling Angular:
+
+> “When I run the frontend locally, serve Angular on port `4200`, but forward backend requests to Express on port `3000`.”
+
+## The `serve` section
+
+```json
+"serve": {
+  "builder": "@angular/build:dev-server",
+  "options": {
+    "proxyConfig": "src/proxy.conf.json"
+  },
+  "configurations": {
+    "production": {
+      "buildTarget": "frontend:build:production"
+    },
+    "development": {
+      "buildTarget": "frontend:build:development"
+    }
+  },
+  "defaultConfiguration": "development"
+}
+```
+
+### `serve`
+
+This controls what happens when you run:
+
+```powershell
+npm start
+```
+
+or:
+
+```powershell
+ng serve
+```
+
+It starts Angular’s local development server.
+
+### `builder`
+
+```json
+"builder": "@angular/build:dev-server"
+```
+
+This tells Angular which program should run the development server.
+
+You do not need to change this. It is the current builder generated by Angular.
+
+### `options`
+
+```json
+"options": {
+  "proxyConfig": "src/proxy.conf.json"
+}
+```
+
+This contains general settings for the development server.
+
+The important setting is:
+
+```json
+"proxyConfig": "src/proxy.conf.json"
+```
+
+It tells Angular to read proxy instructions from:
+
+```text
+frontend/src/proxy.conf.json
+```
+
+The path is relative to the `frontend` folder.
+
+## The configurations
+
+```json
+"configurations": {
+  "production": {
+    "buildTarget": "frontend:build:production"
+  },
+  "development": {
+    "buildTarget": "frontend:build:development"
+  }
+}
+```
+
+Angular has separate build modes.
+
+The `production` configuration is used for optimized builds.
+
+The `development` configuration is used while coding. It keeps source maps enabled and disables some optimizations to make debugging easier.
+
+This line:
+
+```json
+"defaultConfiguration": "development"
+```
+
+means that running:
+
+```powershell
+ng serve
+```
+
+uses the development configuration automatically.
+
+## The proxy file
+
+Your `frontend/src/proxy.conf.json` should contain:
+
+```json
+{
+  "/api/**": {
+    "target": "http://127.0.0.1:3000",
+    "secure": false
+  },
+  "/auth/**": {
+    "target": "http://127.0.0.1:3000",
+    "secure": false
+  },
+  "/games/**": {
+    "target": "http://127.0.0.1:3000",
+    "secure": false
+  },
+  "/streetview/**": {
+    "target": "http://127.0.0.1:3000",
+    "secure": false
+  }
+}
+```
+
+Each entry says:
+
+> “If the browser requests this kind of URL from Angular, forward it to Express.”
+
+For example, Angular code may call:
+
+```typescript
+fetch("/api/me")
+```
+
+The browser requests:
+
+```text
+http://localhost:4200/api/me
+```
+
+Angular sees `/api/**` and forwards the request to:
+
+```text
+http://127.0.0.1:3000/api/me
+```
+
+The response then comes back through Angular to the browser.
+
+The request flow is:
+
+```text
+Browser
+  |
+  | http://localhost:4200/api/me
+  v
+Angular development server
+  |
+  | forwards to http://127.0.0.1:3000/api/me
+  v
+Express backend
+```
+
+This lets the Angular frontend use relative URLs such as:
+
+```typescript
+/api/me
+/games/start
+/streetview/access-token
+```
+
+without hard-coding the backend address everywhere.
+
+## What the individual proxy settings mean
+
+```json
+"/api/**"
+```
+
+Matches API URLs such as:
+
+```text
+/api/me
+/api/create-checkout-session
+/api/checkout/confirm
+```
+
+The `**` means it also matches deeper paths.
+
+```json
+"target": "http://127.0.0.1:3000"
+```
+
+This is the address where your Express backend is running.
+
+```json
+"secure": false
+```
+
+This tells the proxy not to reject an HTTPS target with an untrusted certificate. Your local backend uses regular HTTP, so this setting does not cause a problem.
+
+## Why use a proxy?
+
+Without the proxy, Angular would need to call:
+
+```typescript
+fetch("http://localhost:3000/api/me")
+```
+
+That creates a different origin from the frontend at port `4200`, which can lead to CORS and cookie problems.
+
+With the proxy, Angular calls:
+
+```typescript
+fetch("/api/me")
+```
+
+The browser considers the request same-origin because it is talking to port `4200`. Angular forwards it internally to Express.
+
+This is especially important because your authentication uses an HTTP-only cookie.
+
+## What happens in production?
+
+This proxy is only for local development.
+
+Later, when Angular is built for production, the proxy will not be included. The Angular files will be built and served through your existing deployment setup.
+
+For now, run:
+
+Terminal 1:
+
+```powershell
+npm run dev
+```
+
+Terminal 2, inside `frontend`:
+
+```powershell
+npm start
+```
+
+Then:
+
+- Angular runs at `http://localhost:4200`
+- Express runs at `http://localhost:3000`
+- Angular forwards backend requests to Express
+
+After changing `angular.json` or `proxy.conf.json`, restart `npm start`. Angular only reads the proxy configuration when the development server starts. [Angular proxy documentation](https://angular.dev/tools/cli/serve)

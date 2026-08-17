@@ -1,0 +1,1578 @@
+# Implement Angular game round flow
+
+> Document and verify the existing API response shapes.
+> Scaffold the Angular project.
+> Add development proxying to Express.
+> Build the Angular shell and header.
+> Implement authentication and subscription state.
+> Implement the access gate. (done til here)
+> Implement game start and round state. (next step to implement)
+> Integrate the Mapillary Street View component. (next step to implement)
+> Integrate the Leaflet guessing map. (next step to implement)
+> Implement guess submission and round results.
+> Implement AI hints and AI reviews.
+> Implement final score and “Play Again.”
+> Test refreshes, errors, authentication, and all three rounds.
+> Build Angular for production.
+> Serve the Angular build through the existing deployment.
+> Remove the old static frontend only after Angular has feature parity.
+>
+> Here is the general outline for converting my frontend to Angular-based. Steps 1 through 6 are completed. I would like to do steps 7 - 9 which are:
+>
+> Implement game start and round state.
+> Integrate the Mapillary Street View component.
+> Integrate the Leaflet guessing map.
+>
+> Please do not change the codebase. I would like to modify the files myself. Leave clear instructions and code below.  Please explain what each step is doing as well, so I can have a big picture understanding of what is going on, and why Angular is doing that.
+
+<details><summary>4 previous messages</summary>
+
+> I’ll keep this strictly inspect-only: first I’ll confirm the Angular structure and the existing Express/API contracts, then I’ll give you copy-pasteable code for steps 7–9 with exact file locations and explain the state flow. I’ll also check the project memory for the prior GeoGuesser migration decisions so the instructions match this checkout.
+>
+> The repository already has a minimal Angular app under `frontend/`, plus the existing Express routers and legacy frontend files. I’m narrowing the next instructions to the actual contracts in this checkout so the Angular code will call the right endpoints and use the response fields your server already returns.
+>
+> The existing server contract is clear:
+>
+> - `POST /games/start` returns `{ gameId, imageId, roundId, roundNumber }`.
+> - `GET /streetview/access-token` returns `{ accessToken }`.
+> - The server already protects both `/games` and `/streetview` with authentication plus an active subscription.
+> - The legacy frontend creates one Mapillary viewer and moves it with `moveTo(imageId)`, while Leaflet stores one clickable guess marker.
+>
+> I’m checking the current Angular/Mapillary/Leaflet integration APIs now, then I’ll give you a small service-and-component structure that preserves those contracts.
+>
+> <details><summary>Searched the web</summary>
+>
+> Searched the web for `site:mapillary.github.io/mapillary-js/docs MapillaryJS Viewer moveTo accessToken container ...`
+>
+> </details>
+</details>
+
+No files were changed. I verified the existing Angular structure, Express routes, and legacy Mapillary/Leaflet behavior.
+
+## Existing API shapes
+
+Your protected routes are mounted in [`app.js`](/home/spambuddy/cscc09/project-geoguesser/app.js:27):
+
+| Request | Response |
+|---|---|
+| `POST /games/start` | `{ gameId, imageId, roundId, roundNumber }` |
+| `GET /streetview/access-token` | `{ accessToken }` |
+| `POST /games/:gameId/rounds/:roundId/guess` | `{ distance, guessLocation, actualLocation, newRoundData }` |
+| `GET /games/:gameId/score` | `{ totalDistance }` |
+
+`/games` and `/streetview` require authentication and an active subscription. Missing authentication returns `401`; inactive subscriptions return `403`.
+
+Your existing proxy already covers these paths in [`proxy.conf.json`](/home/spambuddy/cscc09/project-geoguesser/frontend/src/proxy.conf.json:1), so no Express change is currently required.
+
+## 1. Install Leaflet and MapillaryJS
+
+Run this from the Angular directory:
+
+```powershell
+cd frontend
+npm install leaflet@1.9.4 mapillary-js@4.1.2
+npm install -D @types/leaflet
+```
+
+Add their CSS files to `frontend/angular.json`:
+
+```json
+"styles": [
+  "node_modules/leaflet/dist/leaflet.css",
+  "node_modules/mapillary-js/dist/mapillary.css",
+  "src/styles.css"
+]
+```
+
+MapillaryJS supports creating a viewer with an access token and container, then navigating with `moveTo(imageId)`. Its official API also provides `resize()` and `remove()` lifecycle methods. [MapillaryJS Viewer API](https://mapillary.github.io/mapillary-js/api/classes/viewer.Viewer/)
+
+## 2. Add game models
+
+Create:
+
+`frontend/src/app/models/game.models.ts`
+
+```ts
+export interface Coordinates {
+  lat: number;
+  lng: number;
+}
+
+export interface RoundState {
+  gameId: number;
+  imageId: string;
+  roundId: number;
+  roundNumber: number;
+}
+```
+
+`imageId` is intentionally a string because Mapillary IDs can be large.
+
+## 3. Add the game state service
+
+Create:
+
+`frontend/src/app/services/game.service.ts`
+
+```ts
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { computed, inject, Injectable, signal } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
+
+import { RoundState } from '../models/game.models';
+
+@Injectable({
+  providedIn: 'root',
+})
+export class GameService {
+  private readonly http = inject(HttpClient);
+
+  readonly round = signal<RoundState | null>(null);
+  readonly loading = signal(false);
+  readonly error = signal<string | null>(null);
+
+  readonly roundLabel = computed(() => {
+    const currentRound = this.round();
+    return currentRound ? `${currentRound.roundNumber}/3` : '-/3';
+  });
+
+  async startGame(): Promise<void> {
+    if (this.loading()) {
+      return;
+    }
+
+    this.loading.set(true);
+    this.error.set(null);
+
+    try {
+      const response = await firstValueFrom(
+        this.http.post<RoundState>('/games/start', {}),
+      );
+
+      if (
+        response.gameId === undefined ||
+        response.roundId === undefined ||
+        response.roundNumber === undefined ||
+        !response.imageId
+      ) {
+        throw new Error('The server returned incomplete round data');
+      }
+
+      this.round.set({
+        ...response,
+        imageId: String(response.imageId),
+      });
+    } catch (error: unknown) {
+      this.error.set(this.getErrorMessage(error));
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  private getErrorMessage(error: unknown): string {
+    if (error instanceof HttpErrorResponse) {
+      const payload = error.error as
+        | { error?: unknown; message?: unknown }
+        | string
+        | null;
+
+      if (typeof payload === 'string') {
+        return payload;
+      }
+
+      if (payload && typeof payload.error === 'string') {
+        return payload.error;
+      }
+
+      if (payload && typeof payload.message === 'string') {
+        return payload.message;
+      }
+
+      return error.message || 'Request failed';
+    }
+
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    return 'Request failed';
+  }
+}
+```
+
+Angular’s service owns the API call and the current round. The signal makes the round reactive: when `round.set(...)` runs, Angular automatically updates the components using that state.
+
+The server’s `/games/start` endpoint resumes an existing in-progress game. Therefore, refreshing the page should return the same unfinished round.
+
+## 4. Create the Mapillary component
+
+Create:
+
+`frontend/src/app/components/mapillary-viewer/mapillary-viewer.ts`
+
+```ts
+import {
+  AfterViewInit,
+  Component,
+  ElementRef,
+  inject,
+  Input,
+  OnChanges,
+  OnDestroy,
+  SimpleChanges,
+  ViewChild,
+  signal,
+} from '@angular/core';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
+import { Viewer } from 'mapillary-js';
+
+interface AccessTokenResponse {
+  accessToken: string;
+}
+
+@Component({
+  selector: 'app-mapillary-viewer',
+  standalone: true,
+  templateUrl: './mapillary-viewer.html',
+  styleUrl: './mapillary-viewer.css',
+})
+export class MapillaryViewerComponent
+  implements AfterViewInit, OnChanges, OnDestroy
+{
+  @Input({ required: true }) imageId = '';
+
+  @ViewChild('container', { static: true })
+  private readonly container!: ElementRef<HTMLDivElement>;
+
+  readonly loading = signal(true);
+  readonly error = signal<string | null>(null);
+
+  private readonly http = inject(HttpClient);
+
+  private viewer: Viewer | null = null;
+  private initialized = false;
+  private requestNumber = 0;
+
+  ngAfterViewInit(): void {
+    this.initialized = true;
+    void this.loadImage();
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['imageId'] && this.initialized) {
+      void this.loadImage();
+    }
+  }
+
+  private async loadImage(): Promise<void> {
+    if (!this.imageId) {
+      return;
+    }
+
+    const currentRequest = ++this.requestNumber;
+
+    this.loading.set(true);
+    this.error.set(null);
+
+    try {
+      if (!this.viewer) {
+        const tokenResponse = await firstValueFrom(
+          this.http.get<AccessTokenResponse>('/streetview/access-token'),
+        );
+
+        if (!tokenResponse.accessToken) {
+          throw new Error('Mapillary access token was not returned');
+        }
+
+        this.viewer = new Viewer({
+          accessToken: tokenResponse.accessToken,
+          container: this.container.nativeElement,
+          component: {
+            cache: false,
+          },
+        });
+      }
+
+      await this.viewer.moveTo(String(this.imageId));
+
+      requestAnimationFrame(() => {
+        this.viewer?.resize();
+      });
+    } catch (error: unknown) {
+      if (currentRequest === this.requestNumber) {
+        this.error.set(
+          error instanceof Error
+            ? error.message
+            : 'Unable to load Mapillary imagery',
+        );
+      }
+    } finally {
+      if (currentRequest === this.requestNumber) {
+        this.loading.set(false);
+      }
+    }
+  }
+
+  ngOnDestroy(): void {
+    this.viewer?.remove();
+  }
+}
+```
+
+Create:
+
+`frontend/src/app/components/mapillary-viewer/mapillary-viewer.html`
+
+```html
+<div #container class="mapillary-container"></div>
+
+@if (loading()) {
+  <div class="viewer-status">Loading street view...</div>
+}
+
+@if (error()) {
+  <div class="viewer-status error" role="alert">
+    {{ error() }}
+  </div>
+}
+```
+
+Create:
+
+`frontend/src/app/components/mapillary-viewer/mapillary-viewer.css`
+
+```css
+:host {
+  display: block;
+  position: relative;
+  min-height: 420px;
+}
+
+.mapillary-container {
+  width: 100%;
+  height: 100%;
+  min-height: 420px;
+  background: #111827;
+}
+
+.viewer-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: white;
+  background: rgba(17, 24, 39, 0.7);
+}
+
+.viewer-status.error {
+  color: #fecaca;
+}
+```
+
+Angular initializes Mapillary in `AfterViewInit` because the DOM container must exist first. It destroys the viewer in `OnDestroy` so navigating away does not leave event listeners or WebGL resources behind.
+
+## 5. Create the Leaflet guessing component
+
+Create:
+
+`frontend/src/app/components/guess-map/guess-map.ts`
+
+```ts
+import {
+  AfterViewInit,
+  Component,
+  ElementRef,
+  Input,
+  OnChanges,
+  OnDestroy,
+  Output,
+  EventEmitter,
+  SimpleChanges,
+  ViewChild,
+} from '@angular/core';
+
+import * as L from 'leaflet';
+import { Coordinates } from '../../models/game.models';
+
+@Component({
+  selector: 'app-guess-map',
+  standalone: true,
+  templateUrl: './guess-map.html',
+  styleUrl: './guess-map.css',
+})
+export class GuessMapComponent
+  implements AfterViewInit, OnChanges, OnDestroy
+{
+  @Input() resetKey: number | string | null = null;
+
+  @Output() readonly guessChange = new EventEmitter<Coordinates | null>();
+
+  @ViewChild('mapContainer', { static: true })
+  private readonly mapContainer!: ElementRef<HTMLDivElement>;
+
+  private map: L.Map | null = null;
+  private guessMarker: L.CircleMarker | null = null;
+
+  ngAfterViewInit(): void {
+    this.map = L.map(this.mapContainer.nativeElement).setView([20, 0], 2);
+
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(this.map);
+
+    this.map.on('click', (event: L.LeafletMouseEvent) => {
+      const guess: Coordinates = {
+        lat: event.latlng.lat,
+        lng: event.latlng.lng,
+      };
+
+      if (this.guessMarker) {
+        this.guessMarker.setLatLng([guess.lat, guess.lng]);
+      } else {
+        this.guessMarker = L.circleMarker([guess.lat, guess.lng], {
+          radius: 8,
+          color: '#c93b45',
+          fillColor: '#c93b45',
+          fillOpacity: 0.95,
+        }).addTo(this.map!);
+      }
+
+      this.guessChange.emit(guess);
+    });
+
+    requestAnimationFrame(() => {
+      this.map?.invalidateSize({ pan: false });
+    });
+  }
+
+  ngOnChanges(changes: SimpleChanges): void {
+    if (changes['resetKey'] && !changes['resetKey'].firstChange) {
+      this.reset();
+    }
+  }
+
+  private reset(): void {
+    this.guessMarker?.remove();
+    this.guessMarker = null;
+    this.guessChange.emit(null);
+  }
+
+  ngOnDestroy(): void {
+    this.map?.remove();
+  }
+}
+```
+
+Create:
+
+`frontend/src/app/components/guess-map/guess-map.html`
+
+```html
+<div #mapContainer class="guess-map"></div>
+<p class="map-hint">Click the map to place your guess.</p>
+```
+
+Create:
+
+`frontend/src/app/components/guess-map/guess-map.css`
+
+```css
+:host {
+  display: block;
+}
+
+.guess-map {
+  width: 100%;
+  height: 420px;
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.map-hint {
+  margin: 0.5rem 0 0;
+  color: #64748b;
+  text-align: center;
+}
+```
+
+Leaflet is an imperative library, so Angular does not control the map through template bindings. Angular creates it after the element exists, listens for clicks, and removes it during destruction. `invalidateSize()` is important when a map becomes visible after being hidden or resized. [Leaflet reference](https://leafletjs.com/reference)
+
+## 6. Create the game board
+
+Create:
+
+`frontend/src/app/components/game-board/game-board.ts`
+
+```ts
+import {
+  Component,
+  inject,
+  OnInit,
+  signal,
+} from '@angular/core';
+
+import { Coordinates } from '../../models/game.models';
+import { GameService } from '../../services/game.service';
+import { GuessMapComponent } from '../guess-map/guess-map';
+import { MapillaryViewerComponent } from '../mapillary-viewer/mapillary-viewer';
+
+@Component({
+  selector: 'app-game-board',
+  standalone: true,
+  imports: [MapillaryViewerComponent, GuessMapComponent],
+  templateUrl: './game-board.html',
+  styleUrl: './game-board.css',
+})
+export class GameBoardComponent implements OnInit {
+  protected readonly game = inject(GameService);
+  protected readonly selectedGuess = signal<Coordinates | null>(null);
+
+  ngOnInit(): void {
+    void this.game.startGame();
+  }
+
+  protected onGuessChange(guess: Coordinates | null): void {
+    this.selectedGuess.set(guess);
+  }
+
+  protected retry(): void {
+    void this.game.startGame();
+  }
+}
+```
+
+Create:
+
+`frontend/src/app/components/game-board/game-board.html`
+
+```html
+<section class="game-board">
+  @if (game.loading() && !game.round()) {
+    <div class="loading-panel">Starting game...</div>
+  }
+
+  @if (game.error()) {
+    <div class="error-panel" role="alert">
+      {{ game.error() }}
+      <button type="button" (click)="retry()">Retry</button>
+    </div>
+  }
+
+  @if (game.round(); as currentRound) {
+    <div class="round-heading">
+      <h2>Round {{ currentRound.roundNumber }} of 3</h2>
+      <p>Choose a location on the map.</p>
+    </div>
+
+    <div class="game-layout">
+      <section class="streetview-panel">
+        <app-mapillary-viewer
+          [imageId]="currentRound.imageId"
+        />
+      </section>
+
+      <section class="guess-panel">
+        <app-guess-map
+          [resetKey]="currentRound.roundId"
+          (guessChange)="onGuessChange($event)"
+        />
+
+        <div class="guess-status" aria-live="polite">
+          @if (selectedGuess(); as guess) {
+            Guess selected: {{ guess.lat.toFixed(4) }},
+            {{ guess.lng.toFixed(4) }}
+          } @else {
+            No guess selected yet.
+          }
+        </div>
+
+        <p class="next-step-note">
+          Guess submission will be added in step 10.
+        </p>
+      </section>
+    </div>
+  }
+</section>
+```
+
+Create:
+
+`frontend/src/app/components/game-board/game-board.css`
+
+```css
+.game-board {
+  width: min(100%, 1600px);
+  margin: 0 auto;
+}
+
+.round-heading {
+  margin-bottom: 1rem;
+}
+
+.round-heading h2 {
+  margin-bottom: 0.25rem;
+}
+
+.round-heading p {
+  margin: 0;
+  color: #64748b;
+}
+
+.game-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
+  gap: 1rem;
+}
+
+.streetview-panel,
+.guess-panel {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.75rem;
+  background: white;
+}
+
+.guess-status {
+  margin-top: 0.75rem;
+  color: #334155;
+}
+
+.next-step-note {
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.loading-panel,
+.error-panel {
+  padding: 2rem;
+  text-align: center;
+}
+
+.error-panel {
+  color: #b91c1c;
+}
+
+@media (max-width: 900px) {
+  .game-layout {
+    grid-template-columns: 1fr;
+  }
+}
+```
+
+This component coordinates the state:
+
+```text
+GameService
+    ↓ current RoundState
+GameBoard
+    ├── MapillaryViewer(imageId)
+    └── GuessMap(resetKey)
+             ↓ selected coordinates
+       GameBoard.selectedGuess
+```
+
+## 7. Connect the board to the existing shell
+
+Update [`frontend/src/app/app.ts`](/home/spambuddy/cscc09/project-geoguesser/frontend/src/app/app.ts:1):
+
+```ts
+import { Component, inject, OnInit } from '@angular/core';
+
+import { AuthService } from './services/auth.service';
+import { GameService } from './services/game.service';
+import { GameBoardComponent } from './components/game-board/game-board';
+
+@Component({
+  selector: 'app-root',
+  imports: [GameBoardComponent],
+  templateUrl: './app.html',
+  styleUrl: './app.css',
+})
+export class App implements OnInit {
+  protected readonly auth = inject(AuthService);
+  protected readonly game = inject(GameService);
+
+  ngOnInit(): void {
+    void this.auth.initialize();
+  }
+
+  async subscribe(): Promise<void> {
+    await this.auth.startCheckout();
+  }
+
+  async logout(): Promise<void> {
+    await this.auth.logout();
+  }
+}
+```
+
+In [`frontend/src/app/app.html`](/home/spambuddy/cscc09/project-geoguesser/frontend/src/app/app.html:7), change the hard-coded round value:
+
+```html
+<span class="stat-value">{{ game.roundLabel() }}</span>
+```
+
+Replace the existing `.placeholder-card` block with:
+
+```html
+@if (auth.canPlay()) {
+  <app-game-board />
+} @else {
+  <div class="placeholder-card">
+    <h2>Gameplay locked</h2>
+    <p>Sign in and activate your subscription to unlock the game.</p>
+  </div>
+}
+```
+
+Keep your existing access-gate block below it unchanged.
+
+## Verification
+
+Start Express from the project root:
+
+```powershell
+npm run dev
+```
+
+Start Angular in another terminal:
+
+```powershell
+cd frontend
+npm start
+```
+
+Then verify:
+
+1. Sign in with an active subscription.
+2. Angular calls `POST /games/start`.
+3. The response populates the round number and `imageId`.
+4. Mapillary calls `GET /streetview/access-token`, then displays the image.
+5. Clicking Leaflet creates or moves the red guess marker.
+6. Refreshing the page resumes the unfinished round.
+7. Changing `resetKey` later will clear the old guess marker.
+8. Guess submission and advancing through rounds should remain unimplemented until step 10.
+
+Build check:
+
+```powershell
+cd frontend
+npm run build
+```
+
+The three requested steps are now separated cleanly: game state belongs to `GameService`, Mapillary owns its viewer lifecycle, and Leaflet owns its map lifecycle. This also preserves the existing legacy integration pattern already documented in the project memory: `/streetview/access-token`, `moveTo(imageId)`, and Leaflet marker reset behavior.
+
+> I installed leaflet and mapillary. Where exactly in angular.json do I put in the `"styles": [ ... ]`
+
+In `frontend/angular.json`, place it inside:
+
+`projects → frontend → architect → build → options`
+
+Replace the existing line:
+
+```json
+"styles": ["src/styles.css"]
+```
+
+with:
+
+```json
+"styles": [
+  "node_modules/leaflet/dist/leaflet.css",
+  "node_modules/mapillary-js/dist/mapillary.css",
+  "src/styles.css"
+]
+```
+
+The surrounding section in [`angular.json`](</home/spambuddy/cscc09/project-geoguesser/frontend/angular.json:16>) should look like:
+
+```json
+"build": {
+  "builder": "@angular/build:application",
+  "options": {
+    "browser": "src/main.ts",
+    "tsConfig": "tsconfig.app.json",
+    "assets": [
+      {
+        "glob": "**/*",
+        "input": "public"
+      }
+    ],
+    "styles": [
+      "node_modules/leaflet/dist/leaflet.css",
+      "node_modules/mapillary-js/dist/mapillary.css",
+      "src/styles.css"
+    ]
+  }
+}
+```
+
+Do not put it under `serve` or `configurations`.
+
+> I have an issue with the streetview.  It is too narrow.  Can you size the streetview so it's wider. Can you also size the guess map so it fits proportionally?
+>
+> Do not change the codebase - please leave the code below and I'll change the code myself.
+
+Yes. The narrowness comes from two width constraints:
+
+1. `.game-stage` is limited to `1200px`.
+2. `.game-layout` currently gives the Street View only `1.2fr`.
+
+Update both files.
+
+### 1. Widen the game stage
+
+In:
+
+`frontend/src/app/app.css`
+
+Replace the existing `.game-stage` rule with:
+
+```css
+.game-stage {
+  position: relative;
+  width: min(100%, 1800px);
+  min-height: 0;
+  margin: 0 auto;
+  display: block;
+}
+```
+
+### 2. Give Street View more horizontal space
+
+In:
+
+`frontend/src/app/components/game-board/game-board.css`
+
+Replace `.game-layout` with:
+
+```css
+.game-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(360px, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+```
+
+This gives Street View approximately 62% of the available width and the guessing map approximately 38%.
+
+### 3. Make both panels proportional
+
+Add or replace the panel styles with:
+
+```css
+.streetview-panel,
+.guess-panel {
+  min-width: 0;
+  height: clamp(420px, 40vw, 640px);
+  padding: 1rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.75rem;
+  background: white;
+}
+```
+
+### 4. Allow the child components to fill their panels
+
+In:
+
+`frontend/src/app/components/mapillary-viewer/mapillary-viewer.css`
+
+Change the top rules to:
+
+```css
+:host {
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.mapillary-container {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: #111827;
+}
+```
+
+In:
+
+`frontend/src/app/components/guess-map/guess-map.css`
+
+Change the rules to:
+
+```css
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.guess-map {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+```
+
+Keep the existing mobile rule so the panels stack vertically:
+
+```css
+@media (max-width: 900px) {
+  .game-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .streetview-panel,
+  .guess-panel {
+    height: 480px;
+  }
+}
+```
+
+The final layout will be:
+
+```text
+Desktop:
+┌──────────────────────────────┬─────────────────┐
+│                              │                 │
+│       Wider Street View     │   Guess Map     │
+│                              │                 │
+└──────────────────────────────┴─────────────────┘
+
+Mobile:
+┌──────────────────────────────┐
+│       Street View            │
+├──────────────────────────────┤
+│       Guess Map              │
+└──────────────────────────────┘
+```
+
+> It's not right. Can you center the placeholder-card for the whole screen, and make the streetview wider?  When I log into the game, the streetview is tall and skinny.  You are free to change the codebase
+
+<details><summary>4 previous messages</summary>
+
+> I’ll fix this in the codebase now. I’m going to inspect the current shell and game-board CSS first, then adjust the locked placeholder to be viewport-centered and change the desktop layout so Street View receives a wide, stable panel instead of a narrow column.
+>
+> I found the main cause: when gameplay is active, `<app-game-board>` is still wrapped inside `.placeholder-card`, whose width is capped at `620px`. That forces both columns—and especially Street View—into a skinny container. I’m removing that active-game wrapper and making the locked state use the full available viewport for centering.
+>
+> The first patch attempt hit a Windows/WSL path-handling error before changing anything. I’m switching to the repository’s WSL path for the edit mechanism and will verify the resulting diffs afterward.
+>
+> The edit tools are currently failing at the environment level (`helper_unknown_error`) before any command or patch runs; no files have been changed. I’m retrying once with the workspace’s alternate path handling so I can complete the requested fix rather than just describe it.
+</details>
+
+I found the cause: `<app-game-board>` is still wrapped inside `.placeholder-card`, which limits it to `620px`. That is why Street View becomes tall and skinny.
+
+The environment’s edit tool is currently failing before it can write files, so no code was changed. Apply these changes manually.
+
+In [`app.html`](</home/spambuddy/cscc09/project-geoguesser/frontend/src/app/app.html:49>), replace the current outer `.placeholder-card` block with:
+
+```html
+@if (auth.canPlay()) {
+  <app-game-board />
+} @else {
+  <div class="placeholder-card">
+    <h2>Gameplay locked</h2>
+    <p>Sign in and activate your subscription to unlock the game</p>
+  </div>
+}
+```
+
+In [`app.css`](</home/spambuddy/cscc09/project-geoguesser/frontend/src/app/app.css:68>), replace the layout rules with:
+
+```css
+.game-container {
+  flex: 1;
+  position: relative;
+  padding: 1rem;
+  display: flex;
+  align-items: stretch;
+}
+
+.game-stage {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-height: 100%;
+  max-width: 1800px;
+  margin: 0 auto;
+  display: block;
+}
+
+.game-stage.locked {
+  display: grid;
+  place-items: center;
+}
+```
+
+In [`game-board.css`](</home/spambuddy/cscc09/project-geoguesser/frontend/src/app/components/game-board/game-board.css:1>), use:
+
+```css
+.game-board {
+  width: 100%;
+  max-width: 1800px;
+  margin: 0 auto;
+}
+
+.game-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(360px, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.streetview-panel,
+.guess-panel {
+  min-width: 0;
+  height: min(62vh, 620px);
+  min-height: 420px;
+  padding: 1rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.75rem;
+  background: white;
+}
+```
+
+Also add this inside the existing mobile media query:
+
+```css
+@media (max-width: 900px) {
+  .game-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .streetview-panel,
+  .guess-panel {
+    height: 480px;
+  }
+}
+```
+
+The important fix is removing the `.placeholder-card` wrapper around `<app-game-board>`.
+
+> Much better. Only fix now is that the guess-status "No guess selected yet." is weirdly placed. On normal load and default screen size, it's placed over the map-hint "Click the map to place your guess".  Can you find a better place to put the guess-status?
+>
+> Do not modify code. Leave it here, and i will manually edit codebase
+
+The status should sit above the map, below the “Make Your Guess” heading. The overlap happens because the map component currently occupies `height: 100%`, while its hint adds content below that height.
+
+In `frontend/src/app/components/game-board/game-board.html`, move the `guess-status` block before `<app-guess-map>`:
+
+```html
+<section class="guess-panel">
+  <div class="guess-status" aria-live="polite">
+    @if (selectedGuess(); as guess) {
+      Guess selected: {{ guess.lat.toFixed(4) }},
+      {{ guess.lng.toFixed(4) }}
+    } @else {
+      No guess selected yet.
+    }
+  </div>
+
+  <app-guess-map
+    [resetKey]="currentRound.roundId"
+    (guessChange)="onGuessChange($event)"
+  />
+
+  <p class="next-step-note">
+    Guess submission will be added in step 10.
+  </p>
+</section>
+```
+
+Remove the old `guess-status` block from below `<app-guess-map>`.
+
+Then update `game-board.css`:
+
+```css
+.guess-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.guess-status {
+  flex: 0 0 auto;
+  min-height: 1.5rem;
+  margin: 0 0 0.75rem;
+  color: #334155;
+}
+```
+
+Finally, update `guess-map.css` so the map component respects the available space:
+
+```css
+:host {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+}
+
+.guess-map {
+  flex: 1 1 auto;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.map-hint {
+  flex: 0 0 auto;
+  margin: 0.5rem 0 0;
+  color: #64748b;
+  text-align: center;
+}
+```
+
+This gives the panel a clear order:
+
+```text
+Guess status
+Map
+Map hint
+Next-step note
+```
+
+> Ok nice! Can you review my codebase to check if my code looks right functionally for these steps of our migration to Angular?
+>
+> Do not modify the codebase . Indicate clearly any code I should change and I will do so manually
+
+<details><summary>2 previous messages</summary>
+
+> I’ll review this as an inspect-only functional audit for migration steps 7–9: game start/round state, Mapillary, and Leaflet. I’ll check the Angular component lifecycle, API paths/response typing, CSS/container behavior, proxy/dependency configuration, and whether refreshes and authorization behave correctly. I will not edit files or generate build artifacts.
+>
+> The source review already found one definite functional bug in the current code: the Mapillary error template renders the signal function instead of its value. I’m checking the remaining lifecycle and TypeScript details now, including whether the current code compiles, before I give you the prioritized manual changes.
+</details>
+
+Overall, the Angular structure looks correct for steps 7–9. The API paths, proxy, signals, component boundaries, and Leaflet/Mapillary lifecycle approach are appropriate.
+
+I found one definite bug and a few recommended improvements.
+
+## Must change
+
+### 1. Fix the Mapillary error message
+
+In [`mapillary-viewer.html`](</home/spambuddy/cscc09/project-geoguesser/frontend/src/app/components/mapillary-viewer/mapillary-viewer.html:8>), change:
+
+```html
+{{ error }}
+```
+
+to:
+
+```html
+{{ error() }}
+```
+
+`error` is an Angular signal, so the template must call it to display its value.
+
+### 2. Remove the unused RxJS import
+
+In [`mapillary-viewer.ts`](</home/spambuddy/cscc09/project-geoguesser/frontend/src/app/components/mapillary-viewer/mapillary-viewer.ts:14>), change:
+
+```ts
+import { firstValueFrom, single } from 'rxjs';
+```
+
+to:
+
+```ts
+import { firstValueFrom } from 'rxjs';
+```
+
+This is not currently a gameplay bug, but it is unnecessary.
+
+## Recommended before implementing step 10
+
+### 3. Clear the game state on logout
+
+`GameService` is provided at the root, so its `round` signal survives logout. The header could temporarily continue showing the previous round.
+
+Add this method to [`game.service.ts`](</home/spambuddy/cscc09/project-geoguesser/frontend/src/app/services/game.service.ts:22>):
+
+```ts
+clear(): void {
+  this.round.set(null);
+  this.error.set(null);
+  this.loading.set(false);
+}
+```
+
+Then update [`app.ts`](</home/spambuddy/cscc09/project-geoguesser/frontend/src/app/app.ts:25>):
+
+```ts
+async logout(): Promise<void> {
+  await this.auth.logout();
+  this.game.clear();
+}
+```
+
+### 4. Protect Mapillary viewer creation from duplicate initialization
+
+Currently, if `imageId` changes while the first viewer is still being created, two `Viewer` instances could potentially be created. This is unlikely during the current step, but it can happen when step 10 begins advancing rounds.
+
+Your current `requestNumber` suppresses stale errors, but it does not prevent duplicate viewer creation.
+
+Add:
+
+```ts
+private viewerPromise: Promise<Viewer> | null = null;
+```
+
+Then replace the viewer creation block with a helper:
+
+```ts
+private async getViewer(): Promise<Viewer> {
+  if (this.viewer) {
+    return this.viewer;
+  }
+
+  if (!this.viewerPromise) {
+    this.viewerPromise = this.createViewer();
+  }
+
+  try {
+    return await this.viewerPromise;
+  } catch (error) {
+    this.viewerPromise = null;
+    throw error;
+  }
+}
+
+private async createViewer(): Promise<Viewer> {
+  const tokenResponse = await firstValueFrom(
+    this.http.get<AccessTokenResponse>('/streetview/access-token'),
+  );
+
+  if (!tokenResponse.accessToken) {
+    throw new Error('Mapillary access token was not returned');
+  }
+
+  const viewer = new Viewer({
+    accessToken: tokenResponse.accessToken,
+    container: this.container.nativeElement,
+    component: { cache: false },
+  });
+
+  this.viewer = viewer;
+  return viewer;
+}
+```
+
+Then inside `loadImage()` use:
+
+```ts
+const viewer = await this.getViewer();
+
+await viewer.moveTo(String(this.imageId));
+
+requestAnimationFrame(() => {
+  viewer.resize();
+});
+```
+
+## Optional responsive improvement
+
+The Leaflet map is initialized correctly, but it may need resizing when the browser window changes size.
+
+In [`guess-map.ts`](</home/spambuddy/cscc09/project-geoguesser/frontend/src/app/components/guess-map/guess-map.ts:31>), add:
+
+```ts
+private readonly handleResize = (): void => {
+  this.map?.invalidateSize({ pan: false });
+};
+```
+
+Register it after the map is created:
+
+```ts
+window.addEventListener('resize', this.handleResize);
+```
+
+Remove it during destruction:
+
+```ts
+ngOnDestroy(): void {
+  window.removeEventListener('resize', this.handleResize);
+  this.map?.remove();
+}
+```
+
+## What is already correct
+
+- [`GameService`](</home/spambuddy/cscc09/project-geoguesser/frontend/src/app/services/game.service.ts:22>) calls the correct `POST /games/start` endpoint.
+- `imageId` is preserved as a string.
+- Refreshing can resume the server-side unfinished game.
+- `GameBoardComponent` owns round state and passes `imageId` to Mapillary.
+- Mapillary is initialized after the DOM exists and removed on destruction.
+- Leaflet is initialized after the map container exists and removed on destruction.
+- `resetKey` correctly clears the guess marker when a future round changes.
+- The development proxy covers `/games/**` and `/streetview/**`.
+- The current UI correctly stops before guess submission, which belongs to step 10.
+
+I could not run the TypeScript build because the local command runner returned an environment-level `helper_unknown_error`; therefore compilation and runtime behavior are not fully verified yet.
+
+> For step 4 (protect mapillary viewer creation from duplicate initialization), can you explain exactly where to put the code segments, and which parts to remove the creation block with?
+>
+> I'm assuming this is for mapillary-viewer.ts
+
+Yes—this change is entirely for:
+
+`frontend/src/app/components/mapillary-viewer/mapillary-viewer.ts`
+
+### 1. Fix the RxJS import
+
+At the top, replace:
+
+```ts
+import { firstValueFrom, single } from 'rxjs';
+```
+
+with:
+
+```ts
+import { firstValueFrom } from 'rxjs';
+```
+
+### 2. Add `viewerPromise`
+
+Find the existing properties:
+
+```ts
+private viewer: Viewer | null = null;
+private initialized = false;
+private requestNumber = 0;
+```
+
+Change them to:
+
+```ts
+private viewer: Viewer | null = null;
+private viewerPromise: Promise<Viewer> | null = null;
+private initialized = false;
+private requestNumber = 0;
+```
+
+### 3. Add the helper methods
+
+Place these methods immediately before `private async loadImage()`:
+
+```ts
+private async getViewer(): Promise<Viewer> {
+  if (this.viewer) {
+    return this.viewer;
+  }
+
+  if (!this.viewerPromise) {
+    this.viewerPromise = this.createViewer();
+  }
+
+  try {
+    return await this.viewerPromise;
+  } catch (error) {
+    this.viewerPromise = null;
+    throw error;
+  }
+}
+
+private async createViewer(): Promise<Viewer> {
+  const tokenResponse = await firstValueFrom(
+    this.http.get<AccessTokenResponse>('/streetview/access-token'),
+  );
+
+  if (!tokenResponse.accessToken) {
+    throw new Error('Mapillary access token was not returned');
+  }
+
+  const viewer = new Viewer({
+    accessToken: tokenResponse.accessToken,
+    container: this.container.nativeElement,
+    component: { cache: false },
+  });
+
+  this.viewer = viewer;
+  return viewer;
+}
+```
+
+### 4. Replace the creation block inside `loadImage()`
+
+Find this entire block:
+
+```ts
+if (!this.viewer) {
+  const tokenResponse = await firstValueFrom(
+    this.http.get<AccessTokenResponse>('/streetview/access-token'),
+  );
+
+  if (!tokenResponse.accessToken) {
+    throw new Error('Mapillary access token was not returned');
+  }
+
+  this.viewer = new Viewer({
+    accessToken: tokenResponse.accessToken,
+    container: this.container.nativeElement,
+    component: { cache: false },
+  });
+}
+
+await this.viewer.moveTo(String(this.imageId));
+
+requestAnimationFrame(() => {
+  this.viewer?.resize();
+});
+```
+
+Remove it and replace it with:
+
+```ts
+const viewer = await this.getViewer();
+
+await viewer.moveTo(String(this.imageId));
+
+requestAnimationFrame(() => {
+  viewer.resize();
+});
+```
+
+The rest of `loadImage()` stays unchanged.
+
+The `viewerPromise` acts as a lock. If two image loads happen at nearly the same time, both reuse the same viewer-creation promise instead of creating two Mapillary viewers.
+
+> for the optional responsive improvement regarding Leaflet, where do I do input the `window.addEventListener('resize', this.handleResize);`
+
+In `frontend/src/app/components/guess-map/guess-map.ts`, add it inside `ngAfterViewInit()`, after the Leaflet map has been created and configured.
+
+Your method should look like this:
+
+```ts
+ngAfterViewInit(): void {
+  this.map = L.map(this.mapContainer.nativeElement).setView([20, 0], 2);
+
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(this.map);
+
+  this.map.on('click', (event: L.LeafletMouseEvent) => {
+    // existing click logic
+  });
+
+  window.addEventListener('resize', this.handleResize);
+
+  requestAnimationFrame(() => {
+    this.map?.invalidateSize({ pan: false });
+  });
+}
+```
+
+First, add this property near your existing `map` and `guessMarker` properties:
+
+```ts
+private readonly handleResize = (): void => {
+  this.map?.invalidateSize({ pan: false });
+};
+```
+
+Then remove the listener in `ngOnDestroy()`:
+
+```ts
+ngOnDestroy(): void {
+  window.removeEventListener('resize', this.handleResize);
+  this.map?.remove();
+}
+```
+
+The same `handleResize` function reference must be used in both `addEventListener` and `removeEventListener`.
+
+> Ok can you verify the code for my project, and if I'm ready to move onto the next part of my migration to Angular
+
+<details><summary>1 previous message</summary>
+
+> I’ll do a final inspect-only readiness check for steps 7–9: verify the current Angular files and contracts, check the Mapillary/Leaflet lifecycle changes you just added, look for stale or missing wiring, and attempt a read-only TypeScript check if the workspace runner allows it. I won’t modify the codebase.
+</details>
+
+The main migration structure is correct, but I would make two manual fixes before moving to step 10.
+
+## Must fix
+
+### 1. Fix Mapillary error rendering
+
+In [`mapillary-viewer.html`](</home/spambuddy/cscc09/project-geoguesser/frontend/src/app/components/mapillary-viewer/mapillary-viewer.html:8>), change:
+
+```html
+{{ error }}
+```
+
+to:
+
+```html
+{{ error() }}
+```
+
+Otherwise Angular displays the signal function instead of the error text.
+
+### 2. Remove the unused RxJS import
+
+In [`mapillary-viewer.ts`](</home/spambuddy/cscc09/project-geoguesser/frontend/src/app/components/mapillary-viewer/mapillary-viewer.ts:14>), change:
+
+```ts
+import { firstValueFrom, single } from 'rxjs';
+```
+
+to:
+
+```ts
+import { firstValueFrom } from 'rxjs';
+```
+
+## Current step status
+
+The following parts look functionally correct:
+
+- `GameService` calls `POST /games/start`.
+- Round data is stored in a signal.
+- `imageId` remains a string.
+- Mapillary receives the server token and calls `moveTo(imageId)`.
+- Leaflet initializes after the map element exists.
+- Clicking the map emits coordinates to `GameBoardComponent`.
+- The marker can be moved.
+- `resetKey` clears the marker when the round changes.
+- The Angular proxy and dependencies are configured correctly.
+- The access gate prevents the game component from rendering without an active subscription.
+
+## Still recommended
+
+Your current [`mapillary-viewer.ts`](</home/spambuddy/cscc09/project-geoguesser/frontend/src/app/components/mapillary-viewer/mapillary-viewer.ts:38>) does not yet contain the `viewerPromise` protection. Add that before step 10, when rounds begin changing dynamically.
+
+The optional Leaflet resize listener also has not been added yet. It is not required for the first desktop test, but add it before testing window resizing or mobile layouts.
+
+## Ready to move on?
+
+Yes, after manually applying the two must-fix items above. You can move to step 10: guess submission and round results.
+
+Before doing so, manually smoke-test:
+
+1. Log in with an active subscription.
+2. Confirm `POST /games/start` succeeds.
+3. Confirm Mapillary imagery loads.
+4. Confirm Leaflet accepts a click and displays the marker.
+5. Refresh the page and confirm the unfinished round loads again.
+6. Resize the browser and check whether the Leaflet map remains aligned.
+
+The current code intentionally does not submit guesses or advance rounds yet, so that part is expected to be missing.
+
+I could not run the TypeScript check because the workspace command runner returned `helper_unknown_error`; compilation and runtime behavior therefore remain unverified from this environment.
