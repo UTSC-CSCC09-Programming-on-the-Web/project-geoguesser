@@ -8,7 +8,7 @@ A game will consist of three rounds. The goal is for the user to guess the locat
 
 Stripe and Google OAuth included. Gemini 3.1 used as AI model. PostgreSQL used for database. Angular-based frontend. RESTful backend. Caddy used for HTTPS encryption and as a reverse proxy. Docker compose used to build Docker containers. Deployed on a Lightsail virtual machine.
 
-<img width="1289" height="842" alt="image" src="https://github.com/user-attachments/assets/b790603e-deed-4778-ab6c-6c303d36087a" />
+<img width="1879" height="882" alt="image" src="https://github.com/user-attachments/assets/a5654a20-ad3c-4639-96cb-79177c359688" />
 
 Group members:
 Saran Srishankar srishan3
