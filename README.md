@@ -2,11 +2,11 @@
 
 Geo Guesser replica, accessible at https://geoguessing.me.
 
-The Mapillary API will be used to generate street-views of a randomly selected city in the world. User clicks a direction to move, and the street-view will be updated as a single-page application.
+The Mapillary API will be used to generate street-views of a randomly selected city in the world. User clicks a direction to move, and the street-view will be updated as a single-page application. Real-time enablement implemented to allow a game to be updated if a user plays on multiple devices.
 
 A game will consist of three rounds. The goal is for the user to guess the location on a map. If the user requires some assistance, a hint button provides aid using AI. At the conclusion of a round, the user can seek further feedback using the AI-review button to learn and improve their guesses.
 
-Stripe and Google OAuth included. Gemini 3.1 used as AI model. PostgreSQL used for database. Caddy used for HTTPS encryption and as a reverse proxy. Docker compose used to build Docker containers. Deployed on a Lightsail virtual machine.
+Stripe and Google OAuth included. Gemini 3.1 used as AI model. PostgreSQL used for database. Angular-based frontend. RESTful backend. Caddy used for HTTPS encryption and as a reverse proxy. Docker compose used to build Docker containers. Deployed on a Lightsail virtual machine.
 
 <img width="1289" height="842" alt="image" src="https://github.com/user-attachments/assets/b790603e-deed-4778-ab6c-6c303d36087a" />
 
@@ -15,20 +15,19 @@ Saran Srishankar srishan3
 Ethan Hapurne hapurnee
 Charles Yan Zhao zhaoc133
 
-Authentication: Charles Zhao
-We are using Google for OAuth
+Authentication: Charles
+Google for OAuth
 
-Look and Feel: Ethan Hapurne
-Basic HTML and CSS used to generate front-end. Sample image shown above.
+Look and Feel: Ethan and Saran
+Angular frontend
 
-Real-time enablement: Saran Srishankar
-Using Mapillary API to provide with street-view panoramas. WebRTC connection used if we need real-time enablements.
+Real-time enablement: Saran
+Mapillary API to provide street-view panoramas. Server-sent events for synchronizing games across multiple devices.
 
-AI Integration with MCP / tool: Saran Srishankar
-Use Google AI Studio from Gemini. We create an API key and store it into an environment variable. Then all calls to AI will be made via Express routes in the backend.
+AI Integration with MCP / tool: Saran
+Gemini-3.1-flash-lite used for AI.
 
-Stripe Integration: Charles Zhao
-Sandbox account key: pk_test_51Tqaj3AbWtyerx9ODYQOZCIZxInj4f27KqbahJEbhxPJeamPcEfghc5EELECCBZt2lOLasuu9PFMwhv2e02AujkC00L4lCZiot
+Stripe Integration: Charles
 
-Deployment: Ethan Hapurne
-Virtual Machine will be created using Lightsail. Docker will be used to deploy the application. Namecheap used for domain name.
+Deployment: Ethan
+Lightsail for VM. Docker and Docker compose for deployment. Namecheap for domain name.

@@ -1,3 +1,0 @@
-geoguessing.me, www.geoguessing.me {
-    reverse_proxy app:3000;
-}
