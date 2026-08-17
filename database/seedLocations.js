@@ -157,13 +157,6 @@ const locations = [
     url: "https://www.mapillary.com/app/?lat=41.902289299972&lng=12.495587499972&z=17&pKey=489739962461413&focus=photo",
   },
   {
-    imageId: "1566516437072886",
-    lat: 38.722546509073,
-    lng: -9.1387655925224,
-    location: "Lisbon, Portugal",
-    url: "https://www.mapillary.com/app/?lat=38.722546509073&lng=-9.1387655925224&z=17&pKey=1566516437072886&focus=photo",
-  },
-  {
     imageId: "2591299214580098",
     lat: -36.851616702421,
     lng: 174.7642221988,
@@ -253,13 +246,6 @@ const locations = [
     lng: 8.5408111111111,
     location: "Zurich, Switzerland",
     url: "https://www.mapillary.com/app/?lat=47.376088888889&lng=8.5408111111111&z=17&pKey=370126760997120&focus=photo",
-  },
-  {
-    imageId: "1062366994625018",
-    lat: 46.204426081846,
-    lng: 6.1433068089231,
-    location: "Geneva, Switzerland",
-    url: "https://www.mapillary.com/app/?lat=46.204426081846&lng=6.1433068089231&z=17&pKey=1062366994625018&focus=photo",
   },
   {
     imageId: "289126359582167",
@@ -428,13 +414,6 @@ const locations = [
     lng: 31.022032627471,
     location: "Durban, South Africa",
     url: "https://www.mapillary.com/app/?lat=-29.859165748854&lng=31.022032627471&z=17&pKey=112297447588144&focus=photo",
-  },
-  {
-    imageId: "689454608987639",
-    lat: -1.9448257932394,
-    lng: 30.06111580517,
-    location: "Kigali, Rwanda",
-    url: "https://www.mapillary.com/app/?lat=-1.9448257932394&lng=30.06111580517&z=17&pKey=689454608987639&focus=photo",
   },
   {
     imageId: "1666380157604423",
