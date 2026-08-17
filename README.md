@@ -10,6 +10,9 @@ Stripe and Google OAuth included. Gemini 3.1 used as AI model. PostgreSQL used f
 
 <img width="1879" height="882" alt="image" src="https://github.com/user-attachments/assets/a5654a20-ad3c-4639-96cb-79177c359688" />
 
+<img width="1880" height="834" alt="image" src="https://github.com/user-attachments/assets/5f6ea8e4-527d-4bf9-953b-c4d16337c347" />
+
+
 Group members:
 Saran Srishankar srishan3
 Ethan Hapurne hapurnee
