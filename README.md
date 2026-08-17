@@ -10,24 +10,26 @@ Stripe and Google OAuth included. Gemini 3.1 used as AI model. PostgreSQL used f
 
 <img width="1879" height="882" alt="image" src="https://github.com/user-attachments/assets/a5654a20-ad3c-4639-96cb-79177c359688" />
 
-Group members:
-Saran Srishankar srishan3
-Ethan Hapurne hapurnee
-Charles Yan Zhao zhaoc133
+Group members: Saran Srishankar srishan3, Ethan Hapurne hapurnee, Charles Yan Zhao zhaoc133
 
 Authentication: Charles
-Google for OAuth
+
+- Google for OAuth
 
 Look and Feel: Ethan and Saran
-Angular frontend
+
+- Angular frontend
 
 Real-time enablement: Saran
-Mapillary API to provide street-view panoramas. Server-sent events for synchronizing games across multiple devices.
+
+- Mapillary API to provide street-view panoramas. Server-sent events for synchronizing games across multiple devices.
 
 AI Integration with MCP / tool: Saran
-Gemini-3.1-flash-lite used for AI.
+
+- Gemini-3.1-flash-lite used for AI.
 
 Stripe Integration: Charles
 
 Deployment: Ethan
-Lightsail for VM. Docker and Docker compose for deployment. Namecheap for domain name.
+
+- Lightsail for VM. Docker and Docker compose for deployment. Namecheap for domain name.
