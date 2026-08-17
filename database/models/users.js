@@ -25,6 +25,8 @@ export const Users = sequelize.define(
       unique: true,
       validate: {
         notEmpty: true,
+        len: [1, 22],
+        is: /^[A-Za-z]+[0-9]{0,2}$/,
       },
     },
     authProvider: {

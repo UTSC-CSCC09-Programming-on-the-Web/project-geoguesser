@@ -1,0 +1,179 @@
+<section class="game-board">
+  <div class="live-status" role="status" aria-live="polite">
+    @if (realtime.connected()) {
+      <span>Live updates connected</span>
+    } @else {
+      <span>Live updates reconnecting ...</span>
+    }
+
+    @if (liveUpdate(); as message) {
+      <span>{{ message }}</span>
+    }
+  </div>
+
+  @if (game.loading() && !game.round()) {
+    <div class="loading-panel">Starting game ...</div>
+  }
+
+  @if (game.error()) {
+    <div class="error-panel" role="alert">
+      {{ game.error() }}
+      <button type="button" (click)="retry()">Retry</button>
+    </div>
+  }
+
+  @if (actionError()) {
+    <div class="error-panel" role="alert">
+      {{ actionError() }}
+    </div>
+  }
+
+  @if (game.round(); as currentRound) {
+    @if (phase() === 'playing') {
+      <div class="round-heading">
+        <h2>Round {{ currentRound.roundNumber }} of 3</h2>
+        <p>Choose a location on the map</p>
+      </div>
+
+      <div class="game-layout">
+        <section class="streetview-panel">
+          <app-mapillary-viewer [imageId]="currentRound.imageId" />
+        </section>
+
+        <section class="guess-panel">
+          <div class="guess-status">
+            @if (selectedGuess(); as guess) {
+              Guess selected:
+              {{ guess.lat.toFixed(4) }},
+              {{ guess.lng.toFixed(4) }}
+            } @else {
+              No guess selected yet.
+            }
+          </div>
+
+          <app-guess-map [resetKey]="currentRound.roundId" (guessChange)="onGuessChange($event)" />
+
+          <div class="round-actions">
+            <button
+              class="btn btn-primary"
+              type="button"
+              [disabled]="!selectedGuess() || actionLoading()"
+              (click)="submitGuess()"
+            >
+              {{ actionLoading() ? 'Submitting ...' : 'Submit Guess' }}
+            </button>
+
+            <button
+              class="btn btn-secondary"
+              type="button"
+              [disabled]="aiLoading() || hintUsed()"
+              (click)="requestAi('hint')"
+            >
+              {{ aiLoading() ? 'Thinking ...' : hintUsed() ? 'Hint Used' : 'Hint' }}
+            </button>
+          </div>
+
+          <div class="hint-slot">
+            @if (hintText(); as hint) {
+              <aside class="ai-card" role="status" aria-live="polite">
+                <h3>Location hint</h3>
+                <p>{{ hint }}</p>
+              </aside>
+            }
+          </div>
+
+          @if (aiError()) {
+            <p class="error-message" role="alert">{{ aiError() }}</p>
+          }
+        </section>
+      </div>
+    }
+
+    @if (phase() === 'result') {
+      @if (result(); as roundResult) {
+        <section class="round-result">
+          <div class="round-heading">
+            <h2>Round Complete!</h2>
+            <p>Review your guess before continuing.</p>
+          </div>
+
+          <div class="result-layout">
+            <div class="result-column">
+              <div class="result-streetview">
+                <app-mapillary-viewer [imageId]="currentRound.imageId" />
+              </div>
+
+              <div class="ai-card">
+                <h3>AI Review</h3>
+
+                <button
+                  class="btn btn-secondary"
+                  type="button"
+                  [disabled]="aiLoading() || !!reviewText()"
+                  (click)="requestAi('review')"
+                >
+                  {{
+                    aiLoading() ? 'Analyzing ...' : reviewText() ? 'Review Generated' : 'AI Review'
+                  }}
+                </button>
+
+                @if (reviewText(); as review) {
+                  <p>{{ review }}</p>
+                }
+
+                @if (aiError()) {
+                  <p class="error-message" role="alert">{{ aiError() }}</p>
+                }
+              </div>
+            </div>
+
+            <div class="result-column">
+              <div class="result-map-panel">
+                <app-result-map
+                  [guessLocation]="roundResult.guessLocation"
+                  [actualLocation]="roundResult.actualLocation"
+                />
+              </div>
+
+              <div class="result-summary">
+                <strong> {{ roundResult.distance.toFixed(2) }} km from the location </strong>
+                <span> Actual location: {{ roundResult.actualLocation.location }} </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="round-actions">
+            <button
+              class="btn btn-primary"
+              type="button"
+              [disabled]="actionLoading()"
+              (click)="continueGame()"
+            >
+              {{ roundResult.newRoundData ? 'Next Round' : 'See Final Score' }}
+            </button>
+          </div>
+        </section>
+      }
+    }
+  }
+
+  @if (phase() === 'complete') {
+    <section class="game-over">
+      <h2>Game Over!</h2>
+      <p>Your total distance from the locations was:</p>
+
+      @if (finalScore(); as score) {
+        <p class="final-score">{{ score.toFixed(0) }} km</p>
+      }
+
+      <button
+        class="btn btn-primary"
+        type="button"
+        [disabled]="actionLoading()"
+        (click)="playAgain()"
+      >
+        {{ actionLoading() ? 'Starting ...' : 'Play Again' }}
+      </button>
+    </section>
+  }
+</section>

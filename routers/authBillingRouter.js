@@ -3,8 +3,10 @@ import jwt from "jsonwebtoken";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import Stripe from "stripe";
+import { UniqueConstraintError } from "sequelize";
 import { sequelize } from "../database/datasource.js";
 import { Subscriptions, Users } from "../database/models/models.js";
+import { registerRealtimeClient } from "../utility/realtime.js";
 
 const router = Router();
 
@@ -83,13 +85,41 @@ export const requireActiveSubscription = async (req, res, next) => {
   }
 };
 
-function generateUniqueUsername(displayName, email, id) {
-  const baseUsername = displayName || email?.split("@")[0] || "player";
+function makeUsernameBase(displayName, email) {
+  const source = displayName?.trim() || email?.split("@")[0] || "Player";
 
-  const username = `${baseUsername}_${id}`
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, "_")
-    .slice(0, 255);
+  const words =
+    source
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .match(/[A-Za-z]+/g) || [];
+
+  const base = words
+    .map((word) => word[0].toUpperCase() + word.slice(1).toLowerCase())
+    .join("")
+    .slice(0, 20);
+
+  return base || "Player";
+}
+
+async function generateUniqueUsername(displayName, email, transaction) {
+  const baseUsername = makeUsernameBase(displayName, email);
+
+  for (let suffix = 0; suffix <= 99; suffix += 1) {
+    const candidate = suffix === 0 ? baseUsername : `${baseUsername}${suffix}`;
+
+    const existingUser = await Users.findOne({
+      where: { username: candidate },
+      attributes: ["userId"],
+      transaction,
+    });
+
+    if (!existingUser) {
+      return candidate;
+    }
+  }
+
+  throw new Error(`Unable to create a unique username for "${baseUsername}"`);
 }
 
 const findOrCreateUser = async (profile) => {
@@ -100,51 +130,55 @@ const findOrCreateUser = async (profile) => {
     throw new Error("Google profile did not include an email address");
   }
 
-  // try to find existing user
-  const existingUser = await Users.findOne({
-    where: {
-      authProvider: "google",
-      providerUserId,
-    },
-  });
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      return await sequelize.transaction(async (transaction) => {
+        const existingUser = await Users.findOne({
+          where: {
+            authProvider: "google",
+            providerUserId,
+          },
+          transaction,
+        });
 
-  if (existingUser) {
-    return existingUser;
-  }
+        if (existingUser) {
+          return existingUser;
+        }
 
-  // create new user
-  else {
-    // create unique username
-    const username = `${profile.displayName || "player"}_${profile.id}`
-      .toLowerCase()
-      .replace(/[^a-z0-9_]/g, "_")
-      .slice(0, 255);
-
-    const user = await sequelize.transaction(async (transaction) => {
-      // create new user in db
-      const newUser = await Users.create(
-        {
+        const username = await generateUniqueUsername(
+          profile.displayName,
           email,
-          username,
-          authProvider: "google",
-          providerUserId,
-        },
-        { transaction },
-      );
+          transaction,
+        );
 
-      await Subscriptions.create(
-        {
-          userId: newUser.userId,
-          status: "pending_payment",
-        },
-        { transaction },
-      );
+        const newUser = await Users.create(
+          {
+            email,
+            username,
+            authProvider: "google",
+            providerUserId,
+          },
+          { transaction },
+        );
 
-      return newUser;
-    });
+        await Subscriptions.create(
+          {
+            userId: newUser.userId,
+            status: "pending_payment",
+          },
+          { transaction },
+        );
 
-    return user;
+        return newUser;
+      });
+    } catch (error) {
+      if (!(error instanceof UniqueConstraintError) || attempt === 4) {
+        throw error;
+      }
+    }
   }
+
+  throw new Error("Unable to create a unique user record");
 };
 
 if (oauthEnabled) {
@@ -432,6 +466,16 @@ router.get(
   requireActiveSubscription,
   (req, res) => {
     return res.json({ secretData: "This is only for paying members." });
+  },
+);
+
+// real-time updates
+router.get(
+  "/api/realtime",
+  authenticateToken,
+  requireActiveSubscription,
+  (req, res) => {
+    registerRealtimeClient(req.user.userId, res);
   },
 );
 

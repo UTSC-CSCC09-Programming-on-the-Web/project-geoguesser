@@ -1,0 +1,214 @@
+.game-board {
+  width: 100%;
+  max-width: 1800px;
+  margin: 0 auto;
+}
+
+.round-heading {
+  margin-bottom: 1rem;
+}
+
+.round-heading h2 {
+  margin-bottom: 0.25rem;
+}
+
+.round-heading p {
+  margin: 0;
+  color: #64748b;
+}
+
+.game-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(360px, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.streetview-panel,
+.guess-panel {
+  min-width: 0;
+  height: auto;
+  min-height: max(420px, min(68vh, 680px));
+  padding: 1rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.75rem;
+  background: white;
+}
+
+.guess-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+.guess-panel app-guess-map {
+  flex: 0 0 360px;
+  min-height: 360px;
+}
+
+.guess-status {
+  flex: 0 0 auto;
+  min-height: 1.5rem;
+  margin: 0 0 0.75rem;
+  color: #334155;
+}
+
+.next-step-note {
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.loading-panel,
+.error-panel {
+  padding: 2rem;
+  text-align: center;
+}
+
+.error-panel {
+  color: #b91c1c;
+}
+
+.round-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.round-actions .btn {
+  flex: 1;
+}
+
+.round-result {
+  width: 100%;
+}
+
+.result-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.result-column {
+  min-width: 0;
+}
+
+.result-streetview,
+.result-map-panel {
+  height: min(52vh, 480px);
+  min-height: 320px;
+  padding: 0.75rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.75rem;
+  background: white;
+}
+
+.result-map-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.hint-slot {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow-y: visible;
+}
+
+.hint-slot .ai-card {
+  margin-top: 0.25rem;
+  max-height: none;
+  overflow: visible;
+}
+
+.hint-slot .ai-card h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+}
+
+.hint-slot .ai-card p {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.ai-card {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #bfdbfe;
+  border-left: 4px solid var(--primary-color);
+  border-radius: 0.75rem;
+  background: #eff6ff;
+}
+
+.ai-card h3 {
+  margin-top: 0;
+}
+
+.ai-card p {
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.result-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  background: white;
+  border: 1px solid #dbe3ee;
+}
+
+.game-over {
+  max-width: 600px;
+  margin: 3rem auto;
+  padding: 3rem 2rem;
+  text-align: center;
+  border: 1px solid #dbe3ee;
+  border-radius: 0.75rem;
+  background: white;
+}
+
+.final-score {
+  margin: 1rem 0 2rem;
+  color: var(--primary-color);
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.live-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  color: #475569;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 900px) {
+  .game-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .streetview-panel,
+  .guess-panel {
+    height: auto;
+    min-height: 480px;
+  }
+
+  .guess-panel app-guess-map {
+    flex-basis: 320px;
+    min-height: 320px;
+  }
+
+  .result-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .round-actions {
+    flex-direction: column;
+  }
+}
